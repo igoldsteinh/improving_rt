@@ -1,0 +1,333 @@
+---
+title: "Frequentis Metric Plots"
+author: "Isaac Goldstein"
+date: '2022-06-16'
+output: html_document
+---
+```{r}
+library(tidyverse)
+library(rstan)
+library(tidybayes)
+library(patchwork)
+library(EpiEstim)
+library(epidemia)
+library(rstanarm)
+library(lubridate)
+library(coda)
+options(mc.cores = parallel::detectCores())
+rstan_options(auto_write = TRUE)
+
+source(here::here("R", "rt_utility_functions2.R"))
+
+cbPallette <- c("#999999", "#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2", "#D55E00", "#CC79A7")
+
+```
+
+Data generated in:
+R/simulation_studies/simulation_scripts/stemr_S1_sims.R
+R/simulation_studies/simulation_scripts/stemr_S2_sims.R
+R/simulation_studies/simulation_scripts/stemr_S3_sims.R
+
+Data analyzed in:
+R/simulation_studies/analysis_scripts/rt_estim_gamma
+R/simulation_studies/analysis_scripts/rt_estim_normal
+R/simulation_studies/analysis_scripts/epiestim
+
+Results summarised in:
+R/simulation_studies/analysis_scripts/rtmetric_list.R
+
+Note that the results were originally run with different notation
+"DT" = "S3", "LT" = "S2", "ET" = "S1"
+"gamma" = "estimgamma", "epidemia" = "estimnormal"
+
+Primary metric plot
+```{r}
+final_list <- read_rds(here::here("R", 
+                                  "simulation_studies", 
+                                  "simulation_results", 
+                                  "final_list.rds"))
+
+summary <- map(final_list, ~.x %>%
+                      group_by(model, setting))  %>%
+          bind_rows(.id = "sim")
+
+
+# we can at least make the figure
+
+graph_summary <- summary %>%
+                 filter(setting != "DT_autokappa" & setting != "DT_wronggen" &
+                        setting != "DT_lowtestrho") %>%
+                 dplyr::select(model, 
+                               setting, 
+                               mean_dev, 
+                               MCIW, 
+                               mean_env, 
+                               MASV) %>%
+                 pivot_longer(all_of(c("mean_dev", 
+                                        "MCIW",
+                                        "mean_env",
+                                       "MASV")), names_to = "metric")
+
+graph_summary$metric <- as.factor(graph_summary$metric)
+level_list <- c("mean_env", "MCIW", "mean_dev", "MASV")
+
+
+
+label_list <- c("Envelope", "MCIW", "Deviation", "MASV")
+graph_summary$metric <- factor(graph_summary$metric, levels=level_list, labels=label_list)
+
+
+graph_summary$setting[graph_summary$setting == "ET"] <- "Scenario 1"
+graph_summary$setting[graph_summary$setting == "LT"] <- "Scenario 2"
+graph_summary$setting[graph_summary$setting == "DT"] <- "Scenario 3"
+level_list <- c("Scenario 1", "Scenario 2" , "Scenario 3")
+
+graph_summary$setting <- as.factor(graph_summary$setting)
+graph_summary$setting <- factor(graph_summary$setting, levels = level_list)
+
+
+graph_summary$model <- as.factor(graph_summary$model)
+
+
+level_list <- c("EpiEstim", "epidemia", "gamma")
+
+label_list <- c("EpiEstim", "Rt-estim-normal", "Rt-estim-gamma")
+
+
+
+graph_summary$model <- factor(graph_summary$model, levels = level_list, labels = label_list)
+
+
+graph_summary <- graph_summary %>%
+                 mutate(model_scenario = paste(model, setting, sep = "_"))
+
+level_list <- c("EpiEstim_Scenario 1", 
+                "EpiEstim_Scenario 2", 
+                "EpiEstim_Scenario 3",
+                "Rt-estim-normal_Scenario 1",
+                "Rt-estim-normal_Scenario 2",
+                "Rt-estim-normal_Scenario 3", 
+                "Rt-estim-gamma_Scenario 1",
+                "Rt-estim-gamma_Scenario 2",
+                "Rt-estim-gamma_Scenario 3")
+
+label_list <- c("EE S1", 
+                "EE S2", 
+                "EE S3", 
+                "EN S1", 
+                "EN S2", 
+                "EN S3", 
+                "EG S1", 
+                "EG S2", 
+                "EG S3")
+
+graph_summary$model_scenario <- factor(graph_summary$model_scenario, levels = level_list, labels = label_list)
+
+# redoing this with separate bar plots so we can add in dotted lin --------
+
+cov_plot <- graph_summary %>%
+            filter(metric == "Envelope") %>%
+            ggplot(aes(x = model_scenario, y = value, shape = setting)) +
+            geom_boxplot() +
+            geom_hline(yintercept=0.95, linetype="dashed") +
+            theme_bw() +
+            theme(legend.position = "none",
+                  axis.text.x = element_blank(),
+                  text = element_text(size = 14)) +
+            xlab("") +
+            ylab("Envelope") +
+            ggtitle("Envelope") +
+            scale_shape_manual(values = c(0, 1, 2)) 
+cov_plot
+
+
+MCIW_plot <- graph_summary %>% 
+  rename("Setting" = "setting") %>%
+  filter(metric == "MCIW") %>%
+            ggplot(aes(x = model_scenario, y = value, shape = Setting)) +
+            geom_boxplot() +
+  theme_bw() +
+  theme(axis.text.x =element_blank(),
+        text = element_text(size = 14),
+        legend.position = "none") +
+  xlab("") +
+  ylab("MCIW") +
+  ggtitle("MCIW") +
+scale_shape_manual(values = c(0, 1, 2)) 
+
+MCIW_plot
+
+
+
+dev_plot <- graph_summary %>%
+  filter(metric == "Deviation") %>%
+            ggplot(aes(x = model_scenario, y = value, shape = setting)) +
+            geom_boxplot() +
+  geom_hline(yintercept=0, linetype="dashed") +
+  theme_bw() +
+  theme(legend.position = "none",
+        axis.text.x =element_text(angle = 10),
+        text = element_text(size = 14)) +
+  xlab("Method") +
+  ylab("Deviation") +
+  ggtitle("Absolute Deviation") +
+  scale_shape_manual(values = c(0, 1, 2)) 
+
+dev_plot
+
+MASV_plot <- graph_summary %>%
+  filter(metric == "MASV") %>%
+  rename("Setting" = "setting") %>%
+            ggplot(aes(x = model_scenario, y = value, shape = Setting)) +
+            geom_boxplot() +
+  geom_hline(yintercept = 0.12, linetype = "dashed") +
+  theme_bw() +
+  theme(legend.position = "none", 
+        legend.background = element_rect(fill="transparent"),
+        legend.box = "horizontal",
+        axis.text.x = element_text(angle = 10), 
+        text= element_text(size = 14)) +
+  xlab("Method") +
+  ylab("MASV") +
+  ggtitle("MASV") +
+  scale_shape_manual(values = c(0, 1, 2)) 
+
+MASV_plot
+
+
+primary_metric_plot <- cov_plot + MCIW_plot + dev_plot + MASV_plot
+primary_metric_plot
+```
+
+
+
+
+# seconday metric plot for the appendices
+```{r}
+app_summary <- map(final_list, ~.x %>%
+                      group_by(model, setting)) %>%
+          bind_rows(.id = "sim")
+app_graph_summary <- app_summary %>%
+                 filter(setting == "DT_autokappa" |
+                          setting == "DT_wronggen" |
+                          setting == "DT_lowtestrho" |
+                          (model == "gamma" & setting == "DT")) %>%
+                 dplyr::select(model, 
+                               setting, 
+                               mean_dev, 
+                               MCIW, 
+                               mean_env, 
+                               MASV) %>%
+                 pivot_longer(all_of(c("mean_dev", 
+                                        "MCIW",
+                                        "mean_env",
+                                       "MASV")), names_to = "metric")
+
+app_graph_summary$metric <- as.factor(app_graph_summary$metric)
+level_list <- c("mean_env", "MCIW", "mean_dev", "MASV")
+
+
+
+label_list <- c("Envelope", "MCIW", "Deviation", "MASV")
+app_graph_summary$metric <- factor(app_graph_summary$metric, levels=level_list, labels=label_list)
+
+
+app_graph_summary$setting[app_graph_summary$setting == "DT"] <- "Default"
+app_graph_summary$setting[app_graph_summary$setting == "DT_autokappa"] <- "Kappa"
+app_graph_summary$setting[app_graph_summary$setting == "DT_wronggen"] <- "Wrong Gen"
+app_graph_summary$setting[app_graph_summary$setting == "DT_lowtestrho"] <- "Alt Rho"
+level_list <- c("Default", "Kappa" , "Wrong Gen", "Alt Rho")
+
+app_graph_summary$setting <- as.factor(app_graph_summary$setting)
+app_graph_summary$setting <- factor(app_graph_summary$setting, levels = level_list)
+
+
+app_graph_summary$model <- as.factor(app_graph_summary$model)
+
+
+level_list <- c("EpiEstim", "epidemia", "gamma")
+
+label_list <- c("EpiEstim", "Rt-estim-normal", "Rt-estim-gamma")
+
+
+
+app_graph_summary$model <- factor(app_graph_summary$model, levels = level_list, labels = label_list)
+
+
+# redoing this with separate bar plots so we can add in dotted lin --------
+
+app_cov_plot <- app_graph_summary %>%
+            filter(metric == "Envelope") %>%
+            ggplot(aes(x = setting, y = value)) +
+            geom_boxplot() +
+            geom_hline(yintercept=0.95, linetype="dashed") +
+            theme_bw() +
+            theme(legend.position = "none",
+                  axis.text.x = element_blank(),
+                  text = element_text(size = 14)) +
+            xlab("") +
+            ylab("Envelope") +
+            ggtitle("Envelope") +
+            scale_shape_manual(values = c(0, 1, 2)) 
+app_cov_plot
+
+
+app_MCIW_plot <- app_graph_summary %>% 
+  rename("Model" = "model") %>%
+  filter(metric == "MCIW") %>%
+  ggplot(aes(x = setting, y = value)) +
+            geom_boxplot() +
+  theme_bw() +
+  theme(axis.text.x =element_blank(),
+        legend.position = c(.7, .8), 
+        legend.background = element_rect(fill="transparent"),
+        legend.box = "horizontal") +
+  xlab("") +
+  ylab("MCIW") +
+  ggtitle("MCIW") +
+scale_shape_manual(values = c(0, 1, 2)) 
+
+app_MCIW_plot
+
+
+
+app_dev_plot <- app_graph_summary %>%
+  filter(metric == "Deviation") %>%
+  ggplot(aes(x = setting, y = value)) +
+            geom_boxplot() +
+  geom_hline(yintercept=0, linetype="dashed") +
+  theme_bw() +
+  theme(legend.position = "none",
+        axis.text.x =element_text(angle = 10),
+        text = element_text(size = 14)) +
+  xlab("Scenario") +
+  ylab("Deviation") +
+  ggtitle("Absolute Deviation") +
+  scale_shape_manual(values = c(0, 1, 2)) 
+
+app_dev_plot
+
+app_MASV_plot <- app_graph_summary %>%
+  filter(metric == "MASV") %>%
+  rename("Model" = "model") %>%
+  ggplot(aes(x = setting, y = value)) +
+            geom_boxplot() +
+  geom_hline(yintercept = 0.12, linetype = "dashed") +
+  theme_bw()  +
+  theme(axis.text.x = element_text(angle = 10), 
+        text= element_text(size = 14),
+        legend.position = "none") +
+  xlab("Scenario") +
+  ylab("MASV") +
+  ggtitle("MASV") +
+  scale_shape_manual(values = c(0, 1, 2)) 
+
+app_MASV_plot
+
+
+app_metric_plot <- app_cov_plot + app_MCIW_plot + app_dev_plot + app_MASV_plot
+app_metric_plot
+
+
+app_metric_plot
+```
