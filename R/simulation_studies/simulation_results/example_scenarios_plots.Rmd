@@ -1,0 +1,1645 @@
+---
+title: "Example Scenario Plots"
+author: "Isaac Goldstein"
+date: '2022-06-16'
+output: html_document
+---
+```{r}
+library(tidyverse)
+library(rstan)
+library(tidybayes)
+library(patchwork)
+library(EpiEstim)
+library(epidemia)
+library(rstanarm)
+library(lubridate)
+library(coda)
+options(mc.cores = parallel::detectCores())
+rstan_options(auto_write = TRUE)
+
+source(here::here("R", "rt_utility_functions2.R"))
+
+cbPallette <- c("#999999", "#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2", "#D55E00", "#CC79A7")
+
+```
+Date generated in:
+R/simulation_studies/simulation_scripts/example_stemr_S1_sims.R
+R/simulation_studies/simulation_scripts/example_stemr_S2_sims.R
+R/simulation_studies/simulation_scripts/example_stemr_S3_sims.R
+
+Rt-estim-gamma posteriors generated in:
+R/simulation_studies/analysis_scripts/rt_estim_gamma/estimgamma_exampleS1.R
+R/simulation_studies/analysis_scripts/rt_estim_gamma/estimgamma_exampleS2.R
+R/simulation_studies/analysis_scripts/rt_estim_gamma/estimgamma_exampleS3.R
+
+Rt-estim-normal posteriors generated in:
+R/simulation_studies/analysis_scripts/rt_estim_normal/estimnormal_exampleS1.R
+R/simulation_studies/analysis_scripts/rt_estim_normal/estimnormal_exampleS2.R
+R/simulation_studies/analysis_scripts/rt_estim_normal/estimnormal_exampleS3.R
+
+
+# Example Scenario Data Visualizations
+```{r}
+#read in the Scenario 1 set first
+set.seed(12511)
+
+r000 <- seq(2.5, 2.45, length.out = 8*7)
+r00 <- seq(1.05, 1.07, length.out = 21)
+r01 <- seq(1.07, 1.25, length.out = 21)
+r02 <- seq(max(r01), 1.85, length.out = 21)
+r03 <- seq(max(r02), 2, length.out = 14)
+r04 <- seq(max(r03), 1.95, length.out = 7)
+r05 <- seq(min(r04), 1.6, length.out = 14)
+r06 <- seq(min(r05), 1.4, length.out = 21)
+r07 <- seq(min(r06), 1, length.out = 14)
+r08 <- seq(min(r07), .9, length.out =7)
+
+r0 <- c(r000, r00, r01, r02, r03, r04, r05, r06, r07, r08)
+
+sim <- read_rds(here::here("R", 
+                           "simulation_studies", 
+                           "simulation_scripts", 
+                           "example_sim_stochastic_S1.rds"))
+sim_paths <- as.data.frame(sim[["paths"]][1])
+#view(sim_paths)
+true_incidence <- sim_paths %>% 
+  dplyr::select(time, S2E, E2I) %>% 
+  rename("incidence" = "S2E")
+
+true_s <- sim_paths %>%
+  dplyr::select(time, S)
+
+#data
+sim_data_sets <- as.data.frame(sim[["datasets"]][1])
+sim_data_sets <- rbind(c(0,0), sim_data_sets)
+tests <- round(rnorm(28*7, mean = 200, sd = 25))
+
+
+time <- 0:(length(tests) -1)
+
+test_frame <- data.frame(tests = tests, time = time)
+
+true_r0 <- data.frame(time = time, r0 = r0)
+
+pop_size <- 3E5
+rho <- 9E-5
+data <- sim_data_sets %>%
+  left_join(true_r0, by = "time") %>% 
+  left_join(true_incidence, by = "time") %>%
+  left_join(true_s, by = "time") %>%
+  left_join(test_frame, by = "time") %>%
+  mutate(percent_s = S/pop_size,
+         true_rt = r0 * percent_s,
+         week = floor(time / 7),
+         true_casemean = E2I * tests * rho) %>%
+  group_by(week) %>%
+  mutate(order = row_number())
+
+
+mid_rt <- data %>%
+  filter(order == 3) %>%
+  dplyr::select(week, true_rt)
+
+
+mid_rt <- data %>%
+  filter(order == 3) %>%
+  dplyr::select(week, true_rt)
+
+last_rt <- data %>%
+  filter(order == 7) %>%
+  dplyr::select(week, true_rt)
+
+full_weekly_sim_data <- data %>%
+  mutate(week = floor(time / 7)) %>%
+  group_by(week ) %>%
+  summarise(total_cases = sum(cases),
+            total_tests = sum(tests),
+            total_incid = sum(incidence),
+            total_E2I = sum(E2I),
+            case_detection = total_cases/total_E2I,
+            total_casemean = sum(true_casemean),
+            empiric_rho = case_detection/total_tests,
+            empiric_posprob = total_cases/total_tests) %>%
+  left_join(mid_rt, by = "week") %>%
+  #filter(week > 3) %>%
+  mutate(time = 0:27) %>%
+  mutate(epidemia_time = 2:29)
+
+sim_incid <- full_weekly_sim_data %>%
+  ggplot(aes(x = time, y = total_incid)) +
+  geom_line() +
+  geom_vline(xintercept = 10, linetype = "dashed") +
+  annotate("rect", xmin = 0, xmax = 10, ymin = 0, ymax = 21000,
+        alpha = .2) +
+  annotate(geom="text", x=5, y=18000, label="Unobserved",
+              color="black") +
+    scale_y_continuous(expand = c(0,0), limits = c(0,21000)) +
+  scale_x_continuous(expand = c(0,0)) +
+  ggtitle("Incidence") +
+  ylab("Incidence") +
+  xlab("") +
+  theme_bw() +
+    theme(text = element_text(size = 14))
+
+sim_rt <- full_weekly_sim_data %>%
+  ggplot(aes(x = time, y = true_rt)) + 
+  geom_line() +
+    geom_vline(xintercept = 10, linetype = "dashed") +
+  annotate("rect", xmin = 0, xmax = 10, ymin = 0, ymax = 2.5,
+        alpha = .2) +
+  ggtitle("Rt") +
+  ylab("Rt") +
+  xlab("") +
+  scale_y_continuous(expand = c(0,0), limits = c(0,2.5)) +
+  scale_x_continuous(expand = c(0,0)) +
+    theme(text = element_text(size = 14)) +
+  theme_bw()+
+    theme(text = element_text(size = 14))
+
+
+
+sim_cases_S1 <- full_weekly_sim_data %>%
+  ggplot(aes(x = time, y = total_cases)) +
+  geom_point() +
+  geom_line() +
+      geom_vline(xintercept = 10, linetype = "dashed") +
+  annotate("rect", xmin = 0, xmax = 10, ymin = 0, ymax = 800,
+        alpha = .2) +
+  ggtitle("Observed Cases (Scenario 1)") +
+  ylab("Cases") +
+  xlab("") +
+    scale_y_continuous(expand = c(0,0), limits = c(0,800)) +
+    scale_x_continuous(expand = c(0,0)) +
+    theme(text = element_text(size = 14)) +
+  theme_bw()+
+    theme(text = element_text(size = 14))
+
+
+sim_tests_S1 <- full_weekly_sim_data %>%
+  ggplot(aes(x = time, y = total_tests)) +
+  geom_point() +
+  geom_line() +
+        geom_vline(xintercept = 10, linetype = "dashed") +
+  annotate("rect", xmin = 0, xmax = 10, ymin = 0, ymax = 7000,
+        alpha = .2) +
+      scale_y_continuous(expand = c(0,0), limits = c(0,7000)) +
+  scale_x_continuous(expand = c(0,0)) +
+  ggtitle("Tests (Scenario 1)") +
+  ylab("Tests") +
+  xlab("") +
+  theme_bw()+
+    theme(text = element_text(size = 14))
+
+
+# now we do it for Scenario 2
+# reading in sims ---------------------------------------------------------
+sim <- read_rds(here::here("R",
+                           "simulation_studies",
+                           "simulation_scripts",
+                           "example_sim_stochastic_S1.rds"))
+
+sim_paths <- as.data.frame(sim[["paths"]][1])
+#view(sim_paths)
+true_incidence <- sim_paths %>% 
+  dplyr::select(time, S2E, E2I) %>% 
+  rename("incidence" = "S2E")
+
+true_s <- sim_paths %>%
+  dplyr::select(time, S)
+
+#data
+sim_data_sets <- as.data.frame(sim[["datasets"]][1])
+sim_data_sets <- rbind(c(0,0), sim_data_sets)
+
+tests0 <- rep(100, 11*7)
+tests1 <- rep(100, 6*7)
+tests11 <- round(seq(100, 150, length.out = 2*7))
+tests2 <- round(seq(max(tests11), 300, length.out = 14))
+tests3 <- round(seq(max(tests2), 450, length.out = 21))
+tests4 <- round(seq(max(tests3), 500, length.out =  21))
+tests5 <- round(seq(max(tests4), 550, length.out = 7))
+
+tests <- c(tests0, tests1, tests11, tests2, tests3, tests4, tests5)
+
+time <- 0:(length(tests) -1)
+
+test_frame <- data.frame(tests = tests, time = time)
+
+true_r0 <- data.frame(time = time, r0 = r0)
+
+pop_size <- 3E5
+rho <- 9E-5
+data <- sim_data_sets %>%
+  left_join(true_r0, by = "time") %>% 
+  left_join(true_incidence, by = "time") %>%
+  left_join(true_s, by = "time") %>%
+  left_join(test_frame, by = "time") %>%
+  mutate(percent_s = S/pop_size,
+         true_rt = r0 * percent_s,
+         week = floor(time / 7),
+         true_casemean = E2I * tests * rho) %>%
+  group_by(week) %>%
+  mutate(order = row_number())
+
+
+mid_rt <- data %>%
+  filter(order == 3) %>%
+  dplyr::select(week, true_rt)
+
+
+mid_rt <- data %>%
+  filter(order == 3) %>%
+  dplyr::select(week, true_rt)
+
+last_rt <- data %>%
+  filter(order == 7) %>%
+  dplyr::select(week, true_rt)
+
+full_weekly_sim_data <- data %>%
+  mutate(week = floor(time / 7)) %>%
+  group_by(week ) %>%
+  summarise(total_cases = sum(cases),
+            total_tests = sum(tests),
+            total_incid = sum(incidence),
+            total_E2I = sum(E2I),
+            case_detection = total_cases/total_E2I,
+            total_casemean = sum(true_casemean),
+            empiric_rho = case_detection/total_tests,
+            empiric_posprob = total_cases/total_tests) %>%
+  left_join(mid_rt, by = "week") %>%
+  #filter(week > 3) %>%
+  mutate(time = 0:27) %>%
+  mutate(epidemia_time = 2:29)
+
+
+
+sim_cases_S2 <- full_weekly_sim_data %>%
+  ggplot(aes(x = time, y = total_cases)) +
+  geom_point() +
+  geom_line() +
+        geom_vline(xintercept = 10, linetype = "dashed") +
+  annotate("rect", xmin = 0, xmax = 10, ymin = 0, ymax = 800,
+        alpha = .2) +
+      scale_y_continuous(expand = c(0,0), limits = c(0,800)) +
+    scale_x_continuous(expand = c(0,0)) +
+  ggtitle("Observed Cases (Scenario 2)") +
+  ylab("Cases") +
+  xlab("") +
+  theme_bw()+
+    theme(text = element_text(size = 14))
+
+
+sim_tests_S2 <- full_weekly_sim_data %>%
+  ggplot(aes(x = time, y = total_tests)) +
+  geom_point() +
+  geom_line() +
+          geom_vline(xintercept = 10, linetype = "dashed") +
+  annotate("rect", xmin = 0, xmax = 10, ymin = 0, ymax = 7000,
+        alpha = .2) +
+      scale_y_continuous(expand = c(0,0), limits = c(0,7000)) +
+    scale_x_continuous(expand = c(0,0)) +
+  ggtitle("Tests (Scenario 2)") +
+  ylab("Tests") +
+  xlab("") +
+  theme_bw()+
+    theme(text = element_text(size = 14))
+
+
+# and finally for Scenario 3
+# reading in sims ---------------------------------------------------------
+sim <- read_rds(here::here("R", 
+                           "simulation_studies", 
+                           "simulation_scripts", 
+                           "example_sim_stochastic_S3.rds"))
+sim_paths <- as.data.frame(sim[["paths"]][1])
+#view(sim_paths)
+true_incidence <- sim_paths %>% 
+  dplyr::select(time, S2E, E2I) %>% 
+  rename("incidence" = "S2E")
+
+true_s <- sim_paths %>%
+  dplyr::select(time, S)
+
+#data
+sim_data_sets <- as.data.frame(sim[["datasets"]][1])
+sim_data_sets <- rbind(c(0,0), sim_data_sets)
+
+tests0 <- rep(100, 11*7)
+tests1 <- rep(100, 8*7)
+tests2 <- round(seq(max(tests1), 300, length.out = 14))
+tests3 <- round(seq(max(tests2), 400, length.out = 21))
+tests4 <- round(seq(max(tests3), 850, length.out =  21))
+tests5 <- round(seq(max(tests4), 1000, length.out = 7))
+
+tests <- c(tests0, tests1, tests2, tests3, tests4, tests5)
+
+tests <- c(tests0, tests1, tests2, tests3, tests4, tests5)
+
+time <- 0:(length(tests) -1)
+
+test_frame <- data.frame(tests = tests, time = time)
+
+true_r0 <- data.frame(time = time, r0 = r0)
+
+pop_size <- 3E5
+rho <- 9E-5
+data <- sim_data_sets %>%
+  left_join(true_r0, by = "time") %>% 
+  left_join(true_incidence, by = "time") %>%
+  left_join(true_s, by = "time") %>%
+  left_join(test_frame, by = "time") %>%
+  mutate(percent_s = S/pop_size,
+         true_rt = r0 * percent_s,
+         week = floor(time / 7),
+         true_casemean = E2I * tests * rho) %>%
+  group_by(week) %>%
+  mutate(order = row_number())
+
+
+mid_rt <- data %>%
+  filter(order == 3) %>%
+  dplyr::select(week, true_rt)
+
+
+mid_rt <- data %>%
+  filter(order == 3) %>%
+  dplyr::select(week, true_rt)
+
+last_rt <- data %>%
+  filter(order == 7) %>%
+  dplyr::select(week, true_rt)
+
+full_weekly_sim_data <- data %>%
+  mutate(week = floor(time / 7)) %>%
+  group_by(week ) %>%
+  summarise(total_cases = sum(cases),
+            total_tests = sum(tests),
+            total_incid = sum(incidence),
+            total_E2I = sum(E2I),
+            case_detection = total_cases/total_E2I,
+            total_casemean = sum(true_casemean),
+            empiric_rho = case_detection/total_tests,
+            empiric_posprob = total_cases/total_tests) %>%
+  left_join(mid_rt, by = "week") %>%
+  #filter(week > 3) %>%
+  mutate(time = 0:27) %>%
+  mutate(epidemia_time = 2:29)
+
+
+sim_cases_S3 <- full_weekly_sim_data %>%
+  ggplot(aes(x = time, y = total_cases)) +
+  geom_point() +
+geom_line() +
+          geom_vline(xintercept = 10, linetype = "dashed") +
+  annotate("rect", xmin = 0, xmax = 10, ymin = 0, ymax = 800,
+        alpha = .2) +
+      scale_y_continuous(expand = c(0,0), limits = c(0,800)) +
+    scale_x_continuous(expand = c(0,0)) +
+  ggtitle("Observed Cases (Scenario 3)") +
+  ylab("Cases") +
+  xlab("Week") +
+  theme_bw()+
+    theme(text = element_text(size = 14))
+
+
+sim_tests_S3 <- full_weekly_sim_data %>%
+  ggplot(aes(x = time, y = total_tests)) +
+  geom_point() +
+  geom_line() +
+            geom_vline(xintercept = 10, linetype = "dashed") +
+  annotate("rect", xmin = 0, xmax = 10, ymin = 0, ymax = 7000,
+        alpha = .2) +
+      scale_y_continuous(expand = c(0,0), limits = c(0,7000)) +
+    scale_x_continuous(expand = c(0,0)) +
+  ggtitle("Tests (Scenario 3)") +
+  ylab("Tests") +
+  xlab("Week") +
+  theme_bw()+
+    theme(text = element_text(size = 14))
+
+
+
+SEIR_data_plot <- (sim_incid + sim_rt) /
+                  (sim_cases_S1 + sim_tests_S1) /
+                  (sim_cases_S2 + sim_tests_S2) /
+                  (sim_cases_S3 + sim_tests_S3)
+
+```
+
+# Rt Plot
+estimgamma plots
+```{r}
+#S1
+weekly_sim_data_S1 <- read_csv(here::here("R",
+                                          "simulation_studies", 
+                                          "simulation_scripts", 
+                                          "S1_weeklydata.csv"))
+
+start_date <- min(weekly_sim_data_S1$time)
+
+
+max_date <- max(weekly_sim_data_S1$time)
+
+### This code requires a posterior which is not in the github
+# posterior_S1 <- read_rds("estimgamma_exampleS1_fit.rds")
+# 
+# 
+# S1_rt_posterior <- summarise_posterior(weekly_sim_data_S1, 
+#                                                            posterior_S1,
+#                                                            trailing_vals = 0,
+#                                                            start_date = start_date
+# )%>%
+# mutate(coverage = true_rt >= rt_CI95l & true_rt <= rt_CI95u)
+
+
+### Here is the product of this code
+S1_rt_posterior <- read_csv(here::here("R", "simulation_studies", 
+                                       "simulation_results",
+                                       "estimgamma_results",
+                                       "estimgamma_S1_rt_posterior.csv"))
+
+max_date <- max(S1_rt_posterior$date)
+S1_rt_plot <-S1_rt_posterior %>% 
+    mutate(date = date + 11) %>%
+    filter(date > 11) %>%
+    ggplot(aes(x = date, y = rt_median,  ymin = rt_CI95l, ymax = rt_CI95u, fill = "95% Credible"))+
+    geom_ribbon(alpha = .4,  color = "steelblue4")+
+    geom_line()+
+    geom_line(aes(x = date, y = true_rt,lty = "Truth"), color = cbPalette[7])+
+    geom_hline(yintercept=1, linetype="dashed", color = "black") +
+    theme_bw()+
+    ylab("Rt")+
+    xlab("")+
+    scale_linetype(name = NULL) +
+    scale_fill_brewer(name="CI", labels="95%", 
+                      guide = guide_legend(title.position = "top", direction = "horizontal"))+
+    theme(legend.position = "none", legend.background = element_rect(fill="transparent"))+
+    ggtitle("Forgot the Title") +
+    theme(
+      panel.grid.major.x = element_blank(),
+      panel.grid.minor.x = element_blank()) +
+    scale_x_continuous(expand = c(0, 0)) + 
+    scale_y_continuous(expand = c(0, 0), limits = c(0, 6))+
+  ggtitle("Rt-estim-gamma Rt") +
+  scale_x_continuous(limits=c(start_date, max_date)) +
+  #ylim(c(.4, 3))+
+  geom_hline(yintercept=1, linetype="dashed", color = "black") +
+  theme(
+    panel.grid.major.x = element_blank(),
+    panel.grid.minor.x = element_blank()) +
+  scale_x_continuous(expand = c(0, 0)) + 
+  scale_y_continuous(expand = c(0, 0), limits = c(0, 6)) +
+  xlab("") +
+  ylab("") +
+    theme(text = element_text(size = 14))
+
+
+
+# S2
+
+weekly_sim_data_S2 <- read_csv(here::here("R", 
+                                          "simulation_studies", 
+                                          "simulation_scripts", 
+                                          "S2_weeklydata.csv"))
+
+start_date <- min(weekly_sim_data_S2$time)
+
+
+max_date <- max(weekly_sim_data_S2$time)
+
+### This code requires a posterior which needs to be generated
+# posterior_S2 <- read_rds("estimgamma_exampleS2_fit.rds")
+# 
+# 
+# S2_rt_posterior <- summarise_posterior(weekly_sim_data_S2, 
+#                                                            posterior_S2,
+#                                                            trailing_vals = 0,
+#                                                            start_date = start_date
+# )%>%
+# mutate(coverage = true_rt >= rt_CI95l & true_rt <= rt_CI95u)
+
+###Here is the product of that code
+S2_rt_posterior <- read_csv(here::here("R", 
+                                       "simulation_studies", 
+                                       "simulation_results", 
+                                       "estimgamma_results", 
+                                       "estimgamma_S2_rt_posterior.csv"))
+
+
+max_date <- max(S2_rt_posterior$date)
+S2_rt_plot <- S2_rt_posterior %>% 
+    mutate(date = date + 11) %>%
+    filter(date > 11) %>%
+    ggplot(aes(x = date, y = rt_median,  ymin = rt_CI95l, ymax = rt_CI95u, fill = "95% Credible"))+
+    geom_ribbon(alpha = .4,  color = "steelblue4")+
+    geom_line()+
+    geom_line(aes(x = date, y = true_rt,lty = "Truth"), color = cbPalette[7])+
+    geom_hline(yintercept=1, linetype="dashed", color = "black") +
+    theme_bw()+
+    ylab("Rt")+
+    xlab("")+
+    scale_linetype(name = NULL) +
+    scale_fill_brewer(name="CI", labels="95%", 
+                      guide = guide_legend(title.position = "top", direction = "horizontal"))+
+    theme(legend.position = "none", legend.background = element_rect(fill="transparent"))+
+    ggtitle("Forgot the Title") +
+    theme(
+      panel.grid.major.x = element_blank(),
+      panel.grid.minor.x = element_blank()) +
+    scale_x_continuous(expand = c(0, 0)) + 
+    scale_y_continuous(expand = c(0, 0), limits = c(0, 6)) +
+  ggtitle("") +
+  scale_x_continuous(limits=c(start_date, max_date)) +
+  #ylim(c(.4, 3))+
+  geom_hline(yintercept=1, linetype="dashed", color = "black") +
+  theme(
+    panel.grid.major.x = element_blank(),
+    panel.grid.minor.x = element_blank()) +
+  scale_x_continuous(expand = c(0, 0)) + 
+  scale_y_continuous(expand = c(0, 0), limits = c(0, 6)) +
+  xlab("") +
+  ylab("") +
+    theme(legend.position = c(0.87, 0.6),
+          text = element_text(size = 14)) 
+
+
+
+# S3
+weekly_sim_data_S3 <- read_csv(here::here("R", 
+                                          "simulation_studies", 
+                                          "simulation_scripts", 
+                                          "S3_weeklydata.csv"))
+
+start_date <- min(weekly_sim_data_S3$time)
+
+
+max_date <- max(weekly_sim_data_S3$time)
+
+### This code requires a posterior which needs to be generated
+# posterior_S3 <- read_rds("estimgamma_exampleS3_fit.rds")
+# 
+# 
+# S3_rt_posterior <- summarise_posterior(weekly_sim_data_S3, 
+#                                                            posterior_S3,
+#                                                            trailing_vals = 0,
+#                                                            start_date = start_date
+# )%>%
+# mutate(coverage = true_rt >= rt_CI95l & true_rt <= rt_CI95u)
+
+###Here is the product of that code
+S3_rt_posterior <- read_csv(here::here("R", 
+                                       "simulation_studies", 
+                                       "simulation_results", 
+                                       "estimgamma_results", 
+                                       "estimgamma_S3_rt_posterior.csv"))
+
+max_date <- max(S3_rt_posterior$date)
+S3_rt_plot <- S3_rt_posterior %>% 
+    mutate(date = date + 11) %>%
+    filter(date > 11) %>%
+    ggplot(aes(x = date, y = rt_median,  ymin = rt_CI95l, ymax = rt_CI95u, fill = "95% Credible"))+
+    geom_ribbon(alpha = .4,  color = "steelblue4")+
+    geom_line()+
+    geom_line(aes(x = date, y = true_rt,lty = "Truth"), color = cbPalette[7])+
+    geom_hline(yintercept=1, linetype="dashed", color = "black") +
+    theme_bw()+
+    ylab("Rt")+
+    xlab("")+
+    scale_linetype(name = NULL) +
+    scale_fill_brewer(name="CI", labels="95%", 
+                      guide = guide_legend(title.position = "top", direction = "horizontal"))+
+    theme(legend.position = "none", legend.background = element_rect(fill="transparent"))+
+    ggtitle("Forgot the Title") +
+    theme(
+      panel.grid.major.x = element_blank(),
+      panel.grid.minor.x = element_blank()) +
+    scale_x_continuous(expand = c(0, 0)) + 
+    scale_y_continuous(expand = c(0, 0), limits = c(0, 6)) +
+  ggtitle("") +
+  scale_x_continuous(limits=c(start_date, max_date)) +
+  #ylim(c(.4, 3))+
+  geom_hline(yintercept=1, linetype="dashed", color = "black") +
+  theme(text = element_text(size = 14),
+    panel.grid.major.x = element_blank(),
+    panel.grid.minor.x = element_blank()) +
+  scale_x_continuous(expand = c(0, 0)) + 
+  scale_y_continuous(expand = c(0, 0), limits = c(0, 6)) +
+  xlab("Week") +
+  ylab("")
+
+
+
+```
+
+estimnormal plots
+```{r}
+
+# S1
+weekly_sim_data_S1 <- read_csv(here::here("R", 
+                                          "simulation_studies", 
+                                          "simulation_scripts", 
+                                          "S1_weeklydata.csv")) %>%
+                      mutate(epidemia_time = epidemia_time - 11)
+
+start_date <- min(weekly_sim_data_S1$week)
+max_date <- max(weekly_sim_data_S1$week)
+
+### Requires posterior
+# estimnormal_res_S1 <- read_rds("estimnormal_exampleS1_fit.rds")
+# 
+# 
+# estimnormal_posterior_rt_S1 <- data.frame(posterior_rt(estimnormal_res_S1)[["draws"]])
+# names(estimnormal_posterior_rt_S1) <- 1:18
+# 
+# 
+# estimnormal_posterior_rt_S1 <- estimnormal_posterior_rt_S1 %>%
+#   mutate(draws = row_number()) %>%
+#   pivot_longer(!draws, names_to = "time", values_to = "value") %>%
+#   mutate(variable = "rt") %>%
+#   dplyr::select(variable, time, value) %>%
+#   group_by(variable, time) %>%
+#   median_qi() 
+# 
+# estimnormal_posterior_rt_S1$time <- as.numeric(estimnormal_posterior_rt_S1$time)
+# 
+# estimnormal_posterior_rt_S1 <- estimnormal_posterior_rt_S1%>%
+#   filter(time != 1) %>%
+#   left_join(weekly_sim_data_S1, by = c("time"="epidemia_time")) %>% 
+#   mutate(coverage = true_rt >= .lower & true_rt <= .upper)
+  
+### Results of above code
+estimnormal_posterior_rt_S1 <- read_csv(here::here("R", 
+                                                   "simulation_studies", 
+                                                   "simulation_results", 
+                                                   "estimnormal_results", 
+                                                   "estimnormal_S1_rt_posterior.csv"))
+
+estimnormal_rt_plot_S1 <- estimnormal_posterior_rt_S1%>%  
+  mutate(time = time -2) %>%
+  mutate(time = time + 11) %>%
+  filter(time > 11) %>%
+  ggplot(aes(x = time, y = value,  ymin = .lower, ymax = .upper, fill = "95% Credible"))+
+  geom_ribbon(alpha = .4,  color = "steelblue4")+
+  geom_line()+
+  geom_line(aes(x = time, y = true_rt), color = cbPallette[7])+
+  geom_hline(yintercept=1, linetype="dashed", color = "black") +
+  theme_bw()+
+  ylab("")+
+  xlab("")+
+  ylim(c(0, 6))+
+  scale_linetype(name = NULL) +
+  scale_fill_brewer(name="CI", labels="95%", 
+                    guide = guide_legend(title.position = "top", direction = "horizontal"))+
+  theme(legend.position = "none", legend.background = element_rect(fill="transparent"))+
+  ggtitle("Rt-estim-normal Rt")  +
+  theme(text = element_text(size = 14),
+    panel.grid.major.x = element_blank(),
+    panel.grid.minor.x = element_blank()) +
+  scale_x_continuous(expand = c(0, 0)) + 
+  scale_y_continuous(expand = c(0, 0), limits = c(0, 6))
+
+
+
+# S2
+weekly_sim_data_S2 <- read_csv(here::here("R", 
+                                          "simulation_studies", 
+                                          "simulation_scripts", 
+                                          "S2_weeklydata.csv")) %>%
+                      mutate(epidemia_time = epidemia_time - 11)
+
+start_date <- min(weekly_sim_data_S2$week)
+max_date <- max(weekly_sim_data_S2$week)
+
+### Requires Posterior
+# estimnormal_res_S2 <- read_rds("estimnormal_exampleS2_fit.rds")
+# 
+# 
+# estimnormal_posterior_rt_S2 <- data.frame(posterior_rt(estimnormal_res_S2)[["draws"]])
+# names(estimnormal_posterior_rt_S2) <- 1:18
+# 
+# 
+# estimnormal_posterior_rt_S2 <- estimnormal_posterior_rt_S2 %>%
+#   mutate(draws = row_number()) %>%
+#   pivot_longer(!draws, names_to = "time", values_to = "value") %>%
+#   mutate(variable = "rt") %>%
+#   dplyr::select(variable, time, value) %>%
+#   group_by(variable, time) %>%
+#   median_qi() 
+# 
+# estimnormal_posterior_rt_S2$time <- as.numeric(estimnormal_posterior_rt_S2$time)
+# 
+# estimnormal_posterior_rt_S2 <- estimnormal_posterior_rt_S2%>%
+#   filter(time != 1) %>%
+#   left_join(weekly_sim_data_S2, by = c("time"="epidemia_time")) %>%
+#   mutate(coverage = true_rt >= .lower & true_rt <= .upper)
+
+### Results of above code
+estimnormal_posterior_rt_S2 <- read_csv(here::here("R", 
+                                                   "simulation_studies", 
+                                                   "simulation_results", 
+                                                   "estimnormal_results", 
+                                                   "estimnormal_S2_rt_posterior.csv"))
+
+estimnormal_rt_plot_S2 <- estimnormal_posterior_rt_S2%>% 
+  mutate(time = time -2) %>%
+  mutate(time = time + 11) %>%
+  filter(time > 11) %>%
+  ggplot(aes(x = time, y = value,  ymin = .lower, ymax = .upper, fill = "95% Credible"))+
+  geom_ribbon(alpha = .4,  color = "steelblue4")+
+  geom_line()+
+  geom_line(aes(x = time, y = true_rt), color = cbPallette[7])+
+  geom_hline(yintercept=1, linetype="dashed", color = "black") +
+  theme_bw()+
+  ylab("")+
+  xlab("")+
+  ylim(c(0, 6))+
+  scale_linetype(name = NULL) +
+  scale_fill_brewer(name="CI", labels="95%", 
+                    guide = guide_legend(title.position = "top", direction = "horizontal"))+
+  theme(legend.position = "none", legend.background = element_rect(fill="transparent"))+
+  ggtitle("") +
+  theme(text = element_text(size = 14),
+    panel.grid.major.x = element_blank(),
+    panel.grid.minor.x = element_blank()) +
+  scale_x_continuous(expand = c(0, 0)) + 
+  scale_y_continuous(expand = c(0, 0), limits = c(0, 6))
+
+
+
+# DT
+weekly_sim_data_S3 <- read_csv(here::here("R", 
+                                          "simulation_studies", 
+                                          "simulation_scripts", 
+                                          "S3_weeklydata.csv")) %>%
+                      mutate(epidemia_time = epidemia_time - 11)
+
+start_date <- min(weekly_sim_data_S3$week)
+max_date <- max(weekly_sim_data_S3$week)
+
+### Requires posterior
+# estimnormal_res_S3 <- read_rds("estimnormal_exampleS2_fit.rds")
+# 
+# 
+# estimnormal_posterior_rt_S3 <- data.frame(posterior_rt(estimnormal_res_S3)[["draws"]])
+# names(estimnormal_posterior_rt_S3) <- 1:18
+# 
+# 
+# estimnormal_posterior_rt_S3 <- estimnormal_posterior_rt_S3 %>%
+#   mutate(draws = row_number()) %>%
+#   pivot_longer(!draws, names_to = "time", values_to = "value") %>%
+#   mutate(variable = "rt") %>%
+#   dplyr::select(variable, time, value) %>%
+#   group_by(variable, time) %>%
+#   median_qi() 
+# 
+# estimnormal_posterior_rt_S3$time <- as.numeric(estimnormal_posterior_rt_S3$time)
+# 
+# estimnormal_posterior_rt_S3 <- estimnormal_posterior_rt_S3%>%
+#   filter(time != 1) %>%
+#   left_join(weekly_sim_data_S3, by = c("time"="epidemia_time")) %>%
+#   mutate(coverage = true_rt >= .lower & true_rt <= .upper)
+
+### Results of above
+estimnormal_posterior_rt_S3 <- read_csv(here::here("R", 
+                                                   "simulation_studies", 
+                                                   "simulation_results", 
+                                                   "estimnormal_results", 
+                                                   "estimnormal_S3_rt_posterior.csv"))
+
+estimnormal_rt_plot_S3 <- estimnormal_posterior_rt_S3%>% 
+  mutate(time = time -2) %>%
+  mutate(time = time + 11) %>%
+  filter(time > 11) %>%
+  ggplot(aes(x = time, y = value,  ymin = .lower, ymax = .upper, fill = "95% Credible"))+
+  geom_ribbon(alpha = .4,  color = "steelblue4")+
+  geom_line()+
+  geom_line(aes(x = time, y = true_rt,lty = "Truth"), color = cbPallette[7])+
+  geom_hline(yintercept=1, linetype="dashed", color = "black") +
+  theme_bw()+
+  ylab("")+
+  xlab("Week")+
+  scale_linetype(name = NULL) +
+  scale_fill_brewer(name="CI", labels="95%", 
+                    guide = guide_legend(title.position = "top", direction = "horizontal"))+
+  theme(legend.position = "none", legend.background = element_rect(fill="transparent"))+
+  ggtitle("") +
+  theme(text = element_text(size = 14),
+    panel.grid.major.x = element_blank(),
+    panel.grid.minor.x = element_blank()) +
+  scale_x_continuous(expand = c(0, 0)) + 
+  scale_y_continuous(expand = c(0, 0), limits = c(0, 6))
+
+
+
+```
+
+EpiEstim Plots
+```{r}
+weekly_sim_data_S1 <- read_csv(here::here("R", 
+                                          "simulation_studies", 
+                                          "simulation_scripts", 
+                                          "S1_weeklydata.csv"))
+weekly_sim_data_S2 <- read_csv(here::here("R", 
+                                          "simulation_studies", 
+                                          "simulation_scripts", 
+                                          "S2_weeklydata.csv"))
+weekly_sim_data_S3 <- read_csv(here::here("R", 
+                                          "simulation_studies", 
+                                          "simulation_scripts",
+                                          "S3_weeklydata.csv"))
+
+weekly_sim_data_S1 <- weekly_sim_data_S1 %>%
+  mutate(time = time + 1)
+
+weekly_sim_data_S2 <- weekly_sim_data_S2 %>%
+  mutate(time = time + 1)
+
+weekly_sim_data_S3 <- weekly_sim_data_S3 %>%
+  mutate(time = time + 1)
+
+    
+# fit model  
+  window = 1
+  GI_mean = 11.5/7
+  GI_var = 2*(GI_mean/2)^2
+  
+  ts <- weekly_sim_data_S1$time
+  ts <- ts[ts > 1 & ts <= (max(ts)-window+1)]
+  te <- ts+(window-1)
+  
+  estimate_R(
+    incid = weekly_sim_data_S1$total_cases,
+    method = "uncertain_si",
+    config = make_config(
+      list(
+        mean_si = GI_mean,
+        min_mean_si = 1,
+        max_mean_si = GI_mean + 1,
+        std_mean_si = 1.5,
+        std_std_si = 1.5,
+        std_si = sqrt(GI_var),
+        min_std_si = sqrt(GI_var)*.8,
+        max_std_si = sqrt(GI_var)*1.2,
+        n1 = 50,
+        n2 = 100, 
+        t_start=ts,
+        t_end=te
+      )
+    )
+  ) -> epiestim_weekly_S1
+  
+  S1_epiestim_weekly_quantile <- epiestim_weekly_S1[["R"]] %>%
+    dplyr::select(t_start, 
+                  rt_mean = `Mean(R)`, 
+                  rt_median = `Median(R)`,
+                  rt_CI95l = `Quantile.0.025(R)`,
+                  rt_CI95u = `Quantile.0.975(R)`) %>%
+    mutate(time  = t_start) %>%
+    left_join(weekly_sim_data_S1, by = "time") %>%
+    mutate(coverage = true_rt >=rt_CI95l & true_rt <= rt_CI95u )
+  
+  
+  
+  EE_plot_S1 <- S1_epiestim_weekly_quantile %>% 
+    mutate(time = time + 10) %>%
+  ggplot(aes(x = time, y = rt_median, ymin = rt_CI95l, ymax = rt_CI95u, fill = "95% Credible"))+
+  geom_ribbon(alpha = .4,  color = "steelblue4")+
+  geom_line()+
+  geom_hline(yintercept=1, linetype="dashed", color = "black") +
+  geom_line(aes(x = time, y = true_rt, lty = "Truth"), color = cbPallette[7]) +
+  theme_bw()+
+  ylab("Rt")+
+  xlab("")+
+  annotate(geom="text", x=16, y=5, label="Scenario 1",
+              color="black") +
+    #ylim(c(.4, 2.5))+
+  scale_linetype(name = NULL) +
+  scale_fill_brewer(name="Credibility", labels="95%", 
+                    guide = guide_legend(title.position = "top", direction = "horizontal"))+
+  theme(legend.position = "none", legend.background = element_rect(fill="transparent"),
+        legend.box = "horizontal")+
+  ggtitle("EpiEstim Rt") +
+  theme(text = element_text(size = 14),
+    panel.grid.major.x = element_blank(),
+    panel.grid.minor.x = element_blank()) +
+  scale_x_continuous(expand = c(0, 0)) + 
+  scale_y_continuous(expand = c(0,0), limits = c(0, 6))
+
+  # LT
+# fit model  
+  window = 1
+  GI_mean = 11.5/7
+  GI_var = 2*(GI_mean/2)^2
+  
+  ts <- weekly_sim_data_S2$time
+  ts <- ts[ts > 1 & ts <= (max(ts)-window+1)]
+  te <- ts+(window-1)
+  
+  estimate_R(
+    incid = weekly_sim_data_S2$total_cases,
+    method = "uncertain_si",
+    config = make_config(
+      list(
+        mean_si = GI_mean,
+        min_mean_si = 1,
+        max_mean_si = GI_mean + 1,
+        std_mean_si = 1.5,
+        std_std_si = 1.5,
+        std_si = sqrt(GI_var),
+        min_std_si = sqrt(GI_var)*.8,
+        max_std_si = sqrt(GI_var)*1.2,
+        n1 = 50,
+        n2 = 100, 
+        t_start=ts,
+        t_end=te
+      )
+    )
+  ) -> epiestim_weekly_S2
+  
+  S2_epiesetim_weekly_quantile <- epiestim_weekly_S2[["R"]] %>%
+    dplyr::select(t_start, 
+                  rt_mean = `Mean(R)`, 
+                  rt_median = `Median(R)`,
+                  rt_CI95l = `Quantile.0.025(R)`,
+                  rt_CI95u = `Quantile.0.975(R)`) %>%
+    mutate(time  = t_start) %>%
+    left_join(weekly_sim_data_S2, by = "time")%>%
+    mutate(coverage = true_rt >=rt_CI95l & true_rt <= rt_CI95u )
+  
+  
+  EE_plot_S2 <- S2_epiesetim_weekly_quantile %>%  
+    mutate(time = time + 10) %>%
+  ggplot(aes(x = time, y = rt_median, ymin = rt_CI95l, ymax = rt_CI95u, fill = "95% Credible"))+
+  geom_ribbon(alpha = .4,  color = "steelblue4")+
+  geom_line()+
+  geom_hline(yintercept=1, linetype="dashed", color = "black") +
+  geom_line(aes(x = time, y = true_rt, lty = "Truth"), color = cbPallette[7]) +
+  theme_bw()+
+  ylab("Rt")+
+  xlab("")+
+  annotate(geom="text", x=16, y=5, label="Scenario 2",
+              color="black") +
+  #ylim(c(.4, 2.5))+
+  scale_linetype(name = NULL) +
+  scale_fill_brewer(name="Credibility", labels="95%", 
+                    guide = guide_legend(title.position = "top", direction = "horizontal"))+
+  theme(legend.position = "none", legend.background = element_rect(fill="transparent"),
+        legend.box = "horizontal")+
+  ggtitle("") +
+  theme(text = element_text(size = 14),
+    panel.grid.major.x = element_blank(),
+    panel.grid.minor.x = element_blank()) +
+  scale_x_continuous(expand = c(0, 0)) + 
+  scale_y_continuous(expand = c(0, 0), limits = c(0, 6))
+
+  
+    # DT
+# fit model  
+  window = 1
+  GI_mean = 11.5/7
+  GI_var = 2*(GI_mean/2)^2
+  
+  ts <- weekly_sim_data_S3$time
+  ts <- ts[ts > 1 & ts <= (max(ts)-window+1)]
+  te <- ts+(window-1)
+  
+  estimate_R(
+    incid = weekly_sim_data_S3$total_cases,
+    method = "uncertain_si",
+    config = make_config(
+      list(
+        mean_si = GI_mean,
+        min_mean_si = 1,
+        max_mean_si = GI_mean + 1,
+        std_mean_si = 1.5,
+        std_std_si = 1.5,
+        std_si = sqrt(GI_var),
+        min_std_si = sqrt(GI_var)*.8,
+        max_std_si = sqrt(GI_var)*1.2,
+        n1 = 50,
+        n2 = 100, 
+        t_start=ts,
+        t_end=te
+      )
+    )
+  ) -> epiestim_weekly_S3
+  
+  S3_epiestim_weekly_quantile <- epiestim_weekly_S3[["R"]] %>%
+    dplyr::select(t_start, 
+                  rt_mean = `Mean(R)`, 
+                  rt_median = `Median(R)`,
+                  rt_CI95l = `Quantile.0.025(R)`,
+                  rt_CI95u = `Quantile.0.975(R)`) %>%
+    mutate(time  = t_start) %>%
+    left_join(weekly_sim_data_S3, by = "time")%>%
+    mutate(coverage = true_rt >=rt_CI95l & true_rt <= rt_CI95u )
+  
+  
+  EE_plot_S3 <- S3_epiestim_weekly_quantile %>%  
+    mutate(time = time + 10) %>%
+  ggplot(aes(x = time, y = rt_median, ymin = rt_CI95l, ymax = rt_CI95u, fill = "95% Credible"))+
+  geom_ribbon(alpha = .4,  color = "steelblue4")+
+  geom_line()+
+  geom_hline(yintercept=1, linetype="dashed", color = "black") +
+  geom_line(aes(x = time, y = true_rt, lty = "Truth"), color = cbPallette[7]) +
+  theme_bw()+
+  ylab("Rt")+
+  xlab("Week")+
+  annotate(geom="text", x=16, y=5, label="Scenario 3",
+              color="black") +
+  #ylim(c(.4, 2.5))+
+  scale_linetype(name = NULL) +
+  scale_fill_brewer(name="Credibility", labels="95%", 
+                    guide = guide_legend(title.position = "top", direction = "horizontal"))+
+  theme(legend.position = "none", legend.background = element_rect(fill="transparent"),
+        legend.box = "horizontal")+
+  ggtitle("") +
+  theme(text = element_text(size = 14),
+    panel.grid.major.x = element_blank(),
+    panel.grid.minor.x = element_blank()) +
+  scale_x_continuous(expand = c(0, 0)) + 
+  scale_y_continuous(expand = c(0, 0), limits = c(0, 6))
+
+```
+
+Combine all plots
+```{r}
+rt_fig <- (EE_plot_S1 + estimnormal_rt_plot_S1 + S1_rt_plot) /
+          (EE_plot_S2 + estimnormal_rt_plot_S2 +  S2_rt_plot)/
+          (EE_plot_S3+ estimnormal_rt_plot_S3 + S3_rt_plot)
+
+```
+
+# Incidence Plot
+estimgamma plots
+```{r}
+###  Requires posterior
+# S1_incid_posterior <-summarise_incid_posterior(weekly_sim_data_S1,
+#                                                                    total_incid,
+#                                                                    posterior_S1,
+#                                                                    num_seed = 8,
+#                                                                    start_date = start_date) %>%
+#                       mutate(coverage=total_incid >= incid_CI95l & total_incid <= incid_CI95u) 
+
+### Results of above
+S1_incid_posterior <- read_csv(here::here("R", 
+                                          "simulation_studies",
+                                          "simulation_results", 
+                                          "estimgamma_results",  
+                                          "estimgamma_S1_incid_posterior.csv"))
+
+
+S1_incid_plot <- S1_incid_posterior %>%
+  filter(date <= 16 & date >= 0) %>%
+  mutate(date = date + 11) %>%
+  filter(date > 11) %>%
+  ggplot(aes(x = date, y = incid_median, ymin = incid_CI95l, ymax = incid_CI95u, fill = "95% Credible"))+
+  geom_ribbon(alpha = .4,  color = "steelblue4")+
+  geom_line()+
+  theme_bw()+
+  ylab("")+
+  xlab("")+
+  geom_line(aes(x = date, y = total_incid), color = cbPallette[7]) +
+  #ylim(c(.4, 2.5))+
+  scale_fill_brewer(name="Confidence level", labels="95%", 
+                    guide = guide_legend(title.position = "top", direction = "horizontal"))+
+  theme(legend.position = "None")+
+  ggtitle("Rt-estim-gamma Incidence")  +
+  theme(text = element_text(size = 14),
+    panel.grid.major.x = element_blank(),
+    panel.grid.minor.x = element_blank()) +
+  scale_x_continuous(expand = c(0, 0)) + 
+  scale_y_continuous(expand = c(0, 0), limits = c(0, 25000), breaks = c(5000, 10000, 15000, 20000, 25000))
+
+
+
+
+
+
+
+# S2
+### Requires posterior
+# S2_incid_posterior <-summarise_incid_posterior(weekly_sim_data_S2,
+#                                                                    total_incid,
+#                                                                    posterior_S2,
+#                                                                    num_seed = 8,
+#                                                                    start_date = start_date) %>%
+#                       mutate(coverage=total_incid >= incid_CI95l & total_incid <= incid_CI95u) 
+
+S2_incid_posterior <- read_csv(here::here("R", 
+                                          "simulation_studies",
+                                          "simulation_results", 
+                                          "estimgamma_results",  
+                                          "estimgamma_S2_incid_posterior.csv"))
+
+
+S2_incid_plot <- S2_incid_posterior %>%
+  filter(date <= 16 & date >= 0) %>%
+  mutate(date = date + 11) %>%
+  filter(date > 11) %>%
+  ggplot(aes(x = date, y = incid_median,  ymin = incid_CI95l, ymax = incid_CI95u, fill = "95% Credible"))+
+  geom_ribbon(alpha = .4,  color = "steelblue4")+
+  geom_line()+
+  geom_line(aes(x = date, y = total_incid,lty = "Truth"), color = cbPallette[7])+
+  geom_hline(yintercept=1, linetype="dashed", color = "black") +
+  theme_bw()+
+  ylab("")+
+  xlab("")+
+  scale_linetype(name = NULL) +
+  scale_fill_brewer(name="CI", labels="95%", 
+                    guide = guide_legend(title.position = "top", direction = "horizontal"))+
+  theme(legend.position = c(0.15, 0.65), legend.background = element_rect(fill="transparent"))+
+  ggtitle("") +
+  theme(text = element_text(size = 14),
+    panel.grid.major.x = element_blank(),
+    panel.grid.minor.x = element_blank()) +
+  scale_x_continuous(expand = c(0, 0)) + 
+  scale_y_continuous(expand = c(0, 0), limits = c(0, 30000), breaks = c(5000, 10000, 15000, 20000, 25000, 30000))
+
+
+
+
+#S3
+### Requires posterior
+# S3_incid_posterior <-summarise_incid_posterior(weekly_sim_data_S3,
+#                                                                    total_incid,
+#                                                                    posterior_S3,
+#                                                                    num_seed = 8,
+#                                                                    start_date = start_date) %>%
+#                       mutate(coverage=total_incid >= incid_CI95l & total_incid <= incid_CI95u) 
+
+
+### Results of above
+S3_incid_posterior <- read_csv(here::here("R", 
+                                          "simulation_studies",
+                                          "simulation_results", 
+                                          "estimgamma_results",  
+                                          "estimgamma_S3_incid_posterior.csv"))
+
+S3_incid_plot <- S3_incid_posterior %>%
+  filter(date <= 16 & date >= 0) %>%
+  mutate(date = date + 11) %>%
+  filter(date > 11) %>%
+  ggplot(aes(x = date, y = incid_median, ymin = incid_CI95l, ymax = incid_CI95u, fill = "95% Credible"))+
+  geom_ribbon(alpha = .4,  color = "steelblue4")+
+  geom_line()+
+  theme_bw()+
+  ylab("")+
+  xlab("Week")+
+  geom_line(aes(x = date, y = total_incid), color = cbPallette[7]) +
+  #ylim(c(.4, 2.5))+
+  scale_fill_brewer(name="Confidence level", labels="95%", 
+                    guide = guide_legend(title.position = "top", direction = "horizontal"))+
+  theme(legend.position = "None")+
+  ggtitle("") +
+  theme(text = element_text(size = 14),
+    panel.grid.major.x = element_blank(),
+    panel.grid.minor.x = element_blank()) +
+  scale_x_continuous(expand = c(0, 0)) + 
+  scale_y_continuous(expand = c(0, 0), limits = c(0, 30000), breaks = c(5000, 10000, 15000, 20000, 25000, 30000))
+
+
+
+
+
+```
+
+estim normal plots
+```{r}
+### incidence posterior 
+
+### Requires posterior
+# estimnormal_posterior_incid_S1<- data.frame(posterior_infections(estimnormal_res_S1)[["draws"]])
+# names(estimnormal_posterior_incid_S1) <- 1:18
+# 
+# 
+# estimnormal_posterior_incid_S1<- estimnormal_posterior_incid_S1%>%
+#   mutate(draws = row_number()) %>%
+#   pivot_longer(!draws, names_to = "time", values_to = "value") %>%
+#   mutate(variable = "incid") %>%
+#   dplyr::select(variable, time, value) %>%
+#   group_by(variable, time) %>%
+#   median_qi() 
+# 
+# estimnormal_posterior_incid_S1$time <- as.numeric(estimnormal_posterior_incid_S1$time)
+# 
+# estimnormal_posterior_incid_S1<- estimnormal_posterior_incid_S1%>%
+#   filter(time != 1) %>%
+#   left_join(weekly_sim_data_S1, by = c("time"="epidemia_time")) %>%
+#   mutate(coverage = total_incid >= .lower & total_incid <= .upper)
+
+### Results of above
+estimnormal_posterior_incid_S1 <- read_csv(here::here("R", 
+                                          "simulation_studies",
+                                          "simulation_results", 
+                                          "estimnormal_results",  
+                                          "estimnormal_S1_incid_posterior.csv"))
+
+estimnormal_incid_plot_S1 <- estimnormal_posterior_incid_S1 %>%  
+  mutate(time = time -2) %>%
+  mutate(time = time + 11) %>%
+  filter(time > 11) %>%
+  ggplot(aes(x = time, y = value,  ymin = .lower, ymax = .upper, fill = "95% Credible"))+
+  geom_ribbon(alpha = .4,  color = "steelblue4")+
+  geom_line()+
+  geom_line(aes(x = time, y = total_incid), color = cbPallette[7])+
+  theme_bw()+
+  ylab("Incidence")+
+  xlab("")+
+  annotate(geom="text", x=16, y=15000, label="Scenario 1",
+              color="black") +
+
+  #ylim(c(.4, 2.5))+
+  scale_linetype(name = NULL) +
+  scale_fill_brewer(name="CI", labels="95%", 
+                    guide = guide_legend(title.position = "top", direction = "horizontal"))+
+  theme(legend.position = "none", legend.background = element_rect(fill="transparent"))+
+  ggtitle("Rt-estim-normal Incidence") +
+  theme(
+    panel.grid.major.x = element_blank(),
+    panel.grid.minor.x = element_blank())  +
+  theme(
+    text = element_text(size =14),
+    panel.grid.major.x = element_blank(),
+    panel.grid.minor.x = element_blank()) +
+  scale_x_continuous(expand = c(0, 0)) + 
+  scale_y_continuous(expand = c(0, 0), limits = c(0, 25000), breaks = c(5000, 10000, 15000, 20000, 25000))
+
+
+# S2
+
+### Requires posterior
+# estimnormal_posterior_incid_S2<- data.frame(posterior_infections(estimnormal_res_S2)[["draws"]])
+# names(estimnormal_posterior_incid_S2) <- 1:18
+# 
+# 
+# estimnormal_posterior_incid_S2<- estimnormal_posterior_incid_S2%>%
+#   mutate(draws = row_number()) %>%
+#   pivot_longer(!draws, names_to = "time", values_to = "value") %>%
+#   mutate(variable = "incid") %>%
+#   dplyr::select(variable, time, value) %>%
+#   group_by(variable, time) %>%
+#   median_qi() 
+# 
+# estimnormal_posterior_incid_S2$time <- as.numeric(estimnormal_posterior_incid_S2$time)
+# 
+# estimnormal_posterior_incid_S2<- estimnormal_posterior_incid_S2%>%
+#   filter(time != 1) %>%
+#   left_join(weekly_sim_data_S2, by = c("time"="epidemia_time"))
+# 
+# estimnormal_posterior_incid_S2 <- estimnormal_posterior_incid_S2 %>%
+#                                mutate(coverage = total_incid >= .lower & total_incid <= .upper)
+
+### Results of above
+estimnormal_posterior_incid_S2 <- read_csv(here::here("R", 
+                                          "simulation_studies",
+                                          "simulation_results", 
+                                          "estimnormal_results",  
+                                          "estimnormal_S2_incid_posterior.csv"))
+
+estimnormal_incid_plot_S2 <- estimnormal_posterior_incid_S2%>%  
+  mutate(time = time -2) %>%
+  mutate(time = time + 11) %>%
+  filter(time > 11) %>%
+  ggplot(aes(x = time, y = value,  ymin = .lower, ymax = .upper, fill = "95% Credible"))+
+  geom_ribbon(alpha = .4,  color = "steelblue4")+
+  geom_line()+
+  geom_line(aes(x = time, y = total_incid), color = cbPallette[7])+
+  theme_bw()+
+  ylab("Incidence")+
+  xlab("")+
+  annotate(geom="text", x=16, y=15000, label="Scenario 2",
+              color="black") +
+
+  #ylim(c(.4, 2.5))+
+  scale_linetype(name = NULL) +
+  scale_fill_brewer(name="CI", labels="95%", 
+                    guide = guide_legend(title.position = "top", direction = "horizontal"))+
+  theme(legend.position = "none", legend.background = element_rect(fill="transparent"))+
+  ggtitle("") +
+  theme(
+    panel.grid.major.x = element_blank(),
+    panel.grid.minor.x = element_blank())   +
+  theme(
+    text = element_text(size = 14),
+    panel.grid.major.x = element_blank(),
+    panel.grid.minor.x = element_blank()) +
+  scale_x_continuous(expand = c(0, 0)) + 
+  scale_y_continuous(expand = c(0, 0), limits = c(0, 30000), breaks = c(5000, 10000, 15000, 20000, 25000, 30000))
+
+
+
+# S3
+
+### Requires Posterior
+# estimnormal_posterior_incid_S3<- data.frame(posterior_infections(estimnormal_res_S3)[["draws"]])
+# names(estimnormal_posterior_incid_S3) <- 1:18
+# 
+# 
+# estimnormal_posterior_incid_S3<- estimnormal_posterior_incid_S3%>%
+#   mutate(draws = row_number()) %>%
+#   pivot_longer(!draws, names_to = "time", values_to = "value") %>%
+#   mutate(variable = "incid") %>%
+#   dplyr::select(variable, time, value) %>%
+#   group_by(variable, time) %>%
+#   median_qi() 
+# 
+# estimnormal_posterior_incid_S3$time <- as.numeric(estimnormal_posterior_incid_S3$time)
+# 
+# estimnormal_posterior_incid_S3<- estimnormal_posterior_incid_S3%>%
+#   filter(time != 1) %>%
+#   left_join(weekly_sim_data_S3, by = c("time"="epidemia_time"))
+# 
+# estimnormal_posterior_incid_S3 <- estimnormal_posterior_incid_S3 %>%
+#                                mutate(coverage = total_incid >= .lower & total_incid <= .upper)
+
+### Results of Above
+estimnormal_posterior_incid_S3 <- read_csv(here::here("R", 
+                                          "simulation_studies",
+                                          "simulation_results", 
+                                          "estimnormal_results",  
+                                          "estimnormal_S3_incid_posterior.csv"))
+
+estimnormal_incid_plot_S3 <- estimnormal_posterior_incid_S3%>%  
+  mutate(time = time -2) %>%
+  mutate(time = time + 11) %>%
+  filter(time > 11) %>%
+  ggplot(aes(x = time, y = value,  ymin = .lower, ymax = .upper, fill = "95% Credible"))+
+  geom_ribbon(alpha = .4,  color = "steelblue4")+
+  geom_line()+
+  geom_line(aes(x = time, y = total_incid), color = cbPallette[7])+
+  theme_bw()+
+ annotate(geom="text", x=16, y=15000, label="Scenario 3",
+              color="black") +
+
+  ylab("Incidence")+
+  xlab("Week")+
+  #ylim(c(.4, 2.5))+
+  scale_linetype(name = NULL) +
+  scale_fill_brewer(name="CI", labels="95%", 
+                    guide = guide_legend(title.position = "top", direction = "horizontal"))+
+  theme(legend.position = "none", legend.background = element_rect(fill="transparent"))+
+  ggtitle("") +
+  theme(
+    text = element_text(size = 14),
+    panel.grid.major.x = element_blank(),
+    panel.grid.minor.x = element_blank())   +
+  theme(
+    panel.grid.major.x = element_blank(),
+    panel.grid.minor.x = element_blank()) +
+  scale_x_continuous(expand = c(0, 0)) + 
+  scale_y_continuous(expand = c(0, 0), limits = c(0, 30000), breaks = c(5000, 10000, 15000, 20000, 25000, 30000))
+
+
+```
+
+combine plots
+```{r}
+incid_fig <- (estimnormal_incid_plot_S1 + S1_incid_plot) /
+            (estimnormal_incid_plot_S2 + S2_incid_plot) /
+              (estimnormal_incid_plot_S3 + S3_incid_plot) 
+
+```
+
+# Case Posterior Predictive Plot
+estimgamma posterior predictives
+All of this requires posteriors
+```{r}
+## posterior predictive cases
+S1_cases_plot <- graph_cases_pp(true_data = weekly_sim_data_S1,
+                                        true_var = total_cases,
+                                        posterior = posterior_S1,
+                                        separation = 60,
+                                        num_pred = 0,
+                                        start_date = start_date) +
+  ggtitle("Rt-estim-gamma Cases") +
+  theme(text = element_text(size = 14),
+    panel.grid.major.x = element_blank(),
+    panel.grid.minor.x = element_blank()) +
+  scale_x_continuous(expand = c(0, 0)) + 
+  scale_y_continuous(expand = c(0, 0), limits = c(0, 1200), breaks = c(200, 400, 600, 800, 1000, 1200)) +
+  xlab("") +
+  ylab("")
+
+## posterior predictive cases
+S2_cases_plot <- graph_cases_pp(true_data = weekly_sim_data_S2,
+                                        true_var = total_cases,
+                                        posterior = posterior_S2,
+                                        separation = 60,
+                                        num_pred = 0,
+                                        start_date = start_date) +
+  ggtitle("")+
+  scale_x_continuous(limits=c(start_date, max_date)) +
+  scale_x_continuous(expand = c(0, 0), breaks = 0:16) +
+  theme(
+    panel.grid.major.x = element_blank(),
+    panel.grid.minor.x = element_blank()) +
+  scale_x_continuous(expand = c(0, 0)) + 
+  scale_y_continuous(expand = c(0, 0), limits = c(0, 1200), breaks = c(200, 400, 600, 800, 1000, 1200)) +
+  xlab("") +
+  ylab("") +
+  scale_fill_brewer(name="CI", labels="95%", 
+                    guide = guide_legend(title.position = "top", direction = "horizontal")) +
+    scale_linetype(name = NULL) +
+  theme(legend.position = c(0.25, 0.65), legend.background = element_rect(fill="transparent"))
+ 
+## posterior predictive cases
+S3_cases_plot <- graph_cases_pp(true_data = weekly_sim_data_S3,
+                                        true_var = total_cases,
+                                        posterior = posterior_S3,
+                                        separation = 60,
+                                        num_pred = 0,
+                                        start_date = start_date) +
+  ggtitle("")+
+  scale_x_continuous(limits=c(start_date, max_date)) +
+  scale_x_continuous(expand = c(0, 0), breaks = 0:16) +
+  theme(
+    text = element_text(size = 14),
+    panel.grid.major.x = element_blank(),
+    panel.grid.minor.x = element_blank()) +
+  scale_x_continuous(expand = c(0, 0)) + 
+  scale_y_continuous(expand = c(0, 0), limits = c(0, 1200), breaks = c(200, 400, 600, 800, 1000, 1200)) +
+  xlab("Week") +
+  ylab("")
+
+```
+
+estimnormal posterior predictives
+```{r}
+true_cases_S1 <- weekly_sim_data_S1 %>%
+              dplyr::select(time, total_cases)
+
+
+### Requires posterior
+# estimnormal_posterior_cases_S1<- data.frame(epidemia::posterior_predict(estimnormal_res_S1)[["draws"]])
+# 
+# names(estimnormal_posterior_cases_S1) <- 1:17
+# 
+# estimnormal_posterior_cases_S1 <- estimnormal_posterior_cases_S1 %>%
+#   mutate(draws = row_number()) %>%
+#   pivot_longer(!draws, names_to = "time", values_to = "value") %>%
+#   mutate(variable = "cases") %>%
+#   dplyr::select(variable, time, value) %>%
+#   group_by(variable, time) %>%
+#   median_qi() 
+#   
+#   
+# estimnormal_posterior_cases_S1$time <- as.numeric(estimnormal_posterior_cases_S1$time)
+# 
+# estimnormal_posterior_cases_S1 <- estimnormal_posterior_cases_S1 %>%
+#   mutate(time = time -1) %>%
+#   left_join(true_cases_S1, by = "time")
+
+### Results of above
+estimnormal_posterior_cases_S1 <- read_csv(here::here("R", 
+                                          "simulation_studies",
+                                          "simulation_results", 
+                                          "estimnormal_results",  
+                                          "estimnormal_S1_cases_posterior.csv"))
+estimnormal_cases_plot_S1 <- estimnormal_posterior_cases_S1 %>%  
+  ggplot(aes(x = time, y = value, ymin = .lower, ymax = .upper, fill = "95% Credible"))+
+  geom_ribbon(alpha = .4,  color = "steelblue4")+
+      geom_line()+
+  theme_bw()+
+  ylab("Cases")+
+  xlab("")+
+  geom_point(aes(x = time, y = total_cases), color = cbPallette[7], show.legend = FALSE) +
+    annotate(geom="text", x=5, y=1000, label="Scenario 1",
+              color="black") +
+
+  #ylim(c(.4, 2.5))+
+  scale_linetype(name = NULL) +
+  scale_fill_brewer(name="CI", labels="95%", 
+                    guide = guide_legend(title.position = "top", direction = "horizontal"))+
+  theme(legend.position = "none", legend.background = element_rect(fill="transparent"))+
+  ggtitle("Rt-estim-normal Cases")  +
+  theme(text = element_text(size = 14),
+    panel.grid.major.x = element_blank(),
+    panel.grid.minor.x = element_blank()) +
+  scale_x_continuous(expand = c(0, 0)) + 
+  scale_y_continuous(expand = c(0, 0), limits = c(0, 1200), breaks = c(200, 400, 600, 800, 1000, 1200))
+
+# S2
+
+true_cases_S2 <- weekly_sim_data_S2 %>%
+              dplyr::select(time, total_cases)
+
+
+### Requires posterior
+# estimnormal_posterior_cases_S2<- data.frame(epidemia::posterior_predict(estimnormal_res_S2)[["draws"]])
+# 
+# names(estimnormal_posterior_cases_S2) <- 1:17
+# 
+# estimnormal_posterior_cases_S2 <- estimnormal_posterior_cases_S2 %>%
+#   mutate(draws = row_number()) %>%
+#   pivot_longer(!draws, names_to = "time", values_to = "value") %>%
+#   mutate(variable = "cases") %>%
+#   dplyr::select(variable, time, value) %>%
+#   group_by(variable, time) %>%
+#   median_qi() 
+#   
+#   
+# estimnormal_posterior_cases_S2$time <- as.numeric(estimnormal_posterior_cases_S2$time)
+# 
+# estimnormal_posterior_cases_S2 <- estimnormal_posterior_cases_S2 %>%
+#   mutate(time = time -1) %>%
+#   left_join(true_cases_S2, by = "time")
+
+### Results of above
+estimnormal_posterior_cases_S2 <- read_csv(here::here("R", 
+                                          "simulation_studies",
+                                          "simulation_results", 
+                                          "estimnormal_results",  
+                                          "estimnormal_S2_cases_posterior.csv"))
+
+estimnormal_cases_plot_S2 <- estimnormal_posterior_cases_S2 %>%  
+  ggplot(aes(x = time, y = value, ymin = .lower, ymax = .upper, fill = "95% Credible"))+
+  geom_ribbon(alpha = .4,  color = "steelblue4")+
+  geom_line()+
+  theme_bw()+
+  ylab("Cases")+
+  xlab("")+
+  geom_point(aes(x = time, y = total_cases), color = cbPallette[7], show.legend = FALSE) +
+    annotate(geom="text", x=5, y=1000, label="Scenario 2",
+              color="black") +
+
+  #ylim(c(.4, 2.5))+
+  scale_linetype(name = NULL) +
+  scale_fill_brewer(name="CI", labels="95%", 
+                    guide = guide_legend(title.position = "top", direction = "horizontal"))+
+  theme(legend.position = "none", legend.background = element_rect(fill="transparent"))+
+  ggtitle("")  +
+  theme(text = element_text(size = 14),
+    panel.grid.major.x = element_blank(),
+    panel.grid.minor.x = element_blank()) +
+  scale_x_continuous(expand = c(0, 0)) + 
+  scale_y_continuous(expand = c(0, 0), limits = c(0, 1200), breaks = c(200, 400, 600, 800, 1000, 1200))
+
+# S3
+
+
+true_cases_S3 <- weekly_sim_data_S3 %>%
+              dplyr::select(time, total_cases)
+
+
+### Requires posterior
+# estimnormal_posterior_cases_S3<- data.frame(epidemia::posterior_predict(estimnormal_res_S3)[["draws"]])
+# 
+# names(estimnormal_posterior_cases_S3) <- 1:17
+# 
+# estimnormal_posterior_cases_S3 <- estimnormal_posterior_cases_S3 %>%
+#   mutate(draws = row_number()) %>%
+#   pivot_longer(!draws, names_to = "time", values_to = "value") %>%
+#   mutate(variable = "cases") %>%
+#   dplyr::select(variable, time, value) %>%
+#   group_by(variable, time) %>%
+#   median_qi() 
+#   
+#   
+# estimnormal_posterior_cases_S3$time <- as.numeric(estimnormal_posterior_cases_S3$time)
+# 
+# estimnormal_posterior_cases_S3 <- estimnormal_posterior_cases_S3 %>%
+#   mutate(time = time -1) %>%
+#   left_join(true_cases_S3, by = "time")
+
+
+### Results of above
+estimnormal_posterior_cases_S3 <- read_csv(here::here("R", 
+                                          "simulation_studies",
+                                          "simulation_results", 
+                                          "estimnormal_results",  
+                                          "estimnormal_S3_cases_posterior.csv"))
+
+estimnormal_cases_plot_S3 <- estimnormal_posterior_cases_S3 %>%  
+  ggplot(aes(x = time, y = value, ymin = .lower, ymax = .upper, fill = "95% Credible"))+
+  geom_ribbon(alpha = .4,  color = "steelblue4")+
+  geom_line()+
+  theme_bw()+
+  ylab("Cases")+
+  xlab("Week")+
+  geom_point(aes(x = time, y = total_cases), color = cbPallette[7], show.legend = FALSE) +
+    annotate(geom="text", x=5, y=1000, label="Scenario 3",
+              color="black") +
+
+  #ylim(c(.4, 2.5))+
+  scale_linetype(name = NULL) +
+  scale_fill_brewer(name="CI", labels="95%", 
+                    guide = guide_legend(title.position = "top", direction = "horizontal"))+
+  theme(legend.position = "none", legend.background = element_rect(fill="transparent"))+
+  ggtitle("")  +
+  theme(text = element_text(size = 14),
+    panel.grid.major.x = element_blank(),
+    panel.grid.minor.x = element_blank()) +
+  scale_x_continuous(expand = c(0, 0)) + 
+  scale_y_continuous(expand = c(0, 0), limits = c(0, 1200), breaks = c(200, 400, 600, 800, 1000, 1200))
+
+```
+
+combine plots
+```{r}
+cases_fig <- (estimnormal_cases_plot_S1 + S1_cases_plot) /
+             (estimnormal_cases_plot_S2 + S2_cases_plot) /
+             (estimnormal_cases_plot_S3 + S3_cases_plot) 
+
+```
+
