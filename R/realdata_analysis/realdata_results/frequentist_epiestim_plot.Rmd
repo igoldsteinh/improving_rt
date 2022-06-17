@@ -1,0 +1,239 @@
+---
+title: "Frequentist EpiEstim"
+author: "Isaac Goldstein"
+date: '2022-06-16'
+output: html_document
+---
+```{r}
+library(tidyverse)
+library(rstan)
+library(tidybayes)
+library(patchwork)
+library(EpiEstim)
+library(epidemia)
+library(rstanarm)
+library(lubridate)
+library(coda)
+options(mc.cores = parallel::detectCores())
+rstan_options(auto_write = TRUE)
+
+source(here::here("R", "rt_utility_functions2.R"))
+
+# color palette from https://www.datanovia.com/en/blog/ggplot-colors-best-tricks-you-will-love/
+cbPallette <- c("#999999", "#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2", "#D55E00", "#CC79A7")
+
+```
+
+Fitting epiestim to data from Orange County, CA
+```{r}
+ca_data <- read_csv(here::here("data", "covid19cases_test.csv"))
+
+weekly_input_data_oc <- create_weekly_data(ca_data, county = "Orange", start_sunday = "2020-07-05")
+
+year_week_date <- weekly_input_data_oc %>%
+             dplyr::select(year, week, min_date, time)
+
+window = 4
+GI_mean = 11.5/7
+GI_var = 2*(GI_mean/2)^2
+
+ts <- weekly_input_data_oc$time
+ts <- ts[ts > 1 & ts <= (max(ts)-window+1)]
+te <- ts+(window-1)
+
+estimate_R(
+  incid = weekly_input_data_oc$total_cases,
+  method="parametric_si",
+  config = make_config(
+    list(
+      mean_si = GI_mean,
+      std_si = sqrt(GI_var),
+      t_start=ts,
+      t_end=te
+    )
+  )
+) -> epiestim_weekly
+
+epiestim_weekly_quantile <- epiestim_weekly[["R"]] %>%
+  dplyr::select(t_start,
+                t_end,
+                rt_mean = `Mean(R)`, 
+                rt_median = `Median(R)`,
+                rt_CI95l = `Quantile.0.025(R)`,
+                rt_CI95u = `Quantile.0.975(R)`) %>%
+  mutate(time  = t_end) %>%
+  left_join(year_week_date, by = "time")
+
+
+epiestim_weekly_plot_window4 <- epiestim_weekly_quantile %>%
+  filter(min_date>= "2020-05-03") %>%
+  ggplot(aes(x = min_date, y = rt_median, ymin = rt_CI95l, ymax = rt_CI95u, fill = "95% Credible"))+
+  geom_ribbon(alpha = .4,  color = "steelblue4")+
+  geom_line()+
+  geom_vline(xintercept = as.numeric(as.Date("2021-01-04")), linetype="solid", color = "grey") +
+  geom_vline(xintercept = as.numeric(as.Date("2021-08-09")), linetype="solid", color = "grey") +
+  geom_vline(xintercept = as.numeric(as.Date("2022-01-04")), linetype="solid", color = "grey") +
+  geom_hline(yintercept=1, linetype="dashed", color = "black") +
+  theme_bw()+
+  ylab("Rt")+
+  xlab("Date")+
+  #ylim(c(.4, 2.5))+
+  scale_linetype(name = NULL) +
+  scale_fill_brewer(name="Credibility", labels="95%", 
+                    guide = guide_legend(title.position = "top", direction = "horizontal"))+
+  theme(legend.position = c(.2, .8), legend.background = element_rect(fill="transparent"))+
+  ggtitle("EpiEstim (OC Data)") +
+  theme(
+    panel.grid.major.x = element_blank(),
+    panel.grid.minor.x = element_blank()) +
+  ylim(0,4) +
+  scale_x_date(date_labels = "%b %Y") +
+  scale_y_continuous(expand = c(0, 0), limits = c(0,6)) 
+
+
+
+epiestim_weekly_plot_window4
+
+```
+
+Fit frequentist epiestim to the same data set
+```{r}
+freq_weekly_input_data_oc <- create_weekly_data(ca_data, county = "Orange", start_sunday = "2020-06-12")
+
+freq_year_week_date <- freq_weekly_input_data_oc %>%
+             dplyr::select(year, week, min_date, time)
+data_length <- dim(freq_weekly_input_data_oc)[1]
+
+weights <- epiestim_weekly$si_distr[2:51]
+
+freq_data <- freq_weekly_input_data_oc %>%
+                        mutate(I = total_cases, 
+                               dates = min_date) %>%
+                        dplyr::select(I, dates)
+
+freq_EE <- poisson_r_estimation(data =freq_data, numdays = 4, weights = weights, 
+                                date_choice = "end", window_size = 4)
+
+rt_pure_plot <- freq_EE %>%
+  ggplot(aes(x = date, y = rt_pure, ymin = rt_pure_low, ymax = rt_pure_high, fill = "95% Confidence"))+
+  geom_ribbon(alpha = .4,  color = "steelblue4")+
+  geom_line()+
+        geom_vline(xintercept = as.numeric(as.Date("2021-01-04")), linetype="solid", color = "grey") +
+    geom_vline(xintercept = as.numeric(as.Date("2021-08-09")), linetype="solid", color = "grey") +
+    geom_vline(xintercept = as.numeric(as.Date("2022-01-04")), linetype="solid", color = "grey") +
+  theme_bw()+
+  ggtitle("Poisson")+
+  ylab("Rt")+
+  xlab("Date") +
+  geom_hline(yintercept=1, linetype="dashed", color = "black") +
+  theme_bw()+
+  ylab("Rt")+
+  xlab("Date")+
+  #ylim(c(.4, 2.5))+
+  scale_linetype(name = NULL) +
+  scale_fill_brewer(name="Confidence", labels="95%", 
+                    guide = guide_legend(title.position = "top", direction = "horizontal"))+
+  theme(legend.position = c(.2, .8), legend.background = element_rect(fill="transparent"))+
+  ggtitle("Poisson (OC Data)") +
+  theme(
+    panel.grid.major.x = element_blank(),
+    panel.grid.minor.x = element_blank()) +
+  ylim(0,6) +
+  scale_x_date(date_labels = "%b %Y") +
+  scale_y_continuous(expand = c(0, 0), limits = c(0, 6)) 
+
+
+rt_pure_plot
+
+rt_plot <- freq_EE %>%
+  ggplot(aes(x = date, y = rt, ymin = rt_low, ymax = rt_high, fill = "95% Confidence"))+
+  geom_ribbon(alpha = .4,  color = "steelblue4")+
+  geom_line()+
+        geom_vline(xintercept = as.numeric(as.Date("2021-01-04")), linetype="solid", color = "grey") +
+    geom_vline(xintercept = as.numeric(as.Date("2021-08-09")), linetype="solid", color = "grey") +
+    geom_vline(xintercept = as.numeric(as.Date("2022-01-04")), linetype="solid", color = "grey") +
+
+  theme_bw()+
+  ggtitle("Quasi-Poisson")+
+  ylab("Rt")+
+  xlab("Date")+
+  scale_fill_brewer(name="Confidence level", labels="95%", 
+                    guide = guide_legend(title.position = "top", direction = "horizontal"))+
+  theme(legend.position = "None") +
+  geom_hline(yintercept=1, linetype="dashed", color = "black") +
+  theme_bw()+
+  ylab("Rt")+
+  xlab("Date")+
+  #ylim(c(.4, 2.5))+
+  scale_linetype(name = NULL) +
+  scale_fill_brewer(name="Confidence", labels="95%", 
+                    guide = guide_legend(title.position = "top", direction = "horizontal"))+
+  theme(legend.position = c(.2, .8), legend.background = element_rect(fill="transparent"))+
+  ggtitle("Quasi-Poisson (OC Data)") +
+  theme(
+    panel.grid.major.x = element_blank(),
+    panel.grid.minor.x = element_blank()) +
+  ylim(0,4) +
+  scale_x_date(date_labels = "%b %Y") +
+  geom_line() +
+  scale_y_continuous(expand = c(0, 0), limits = c(0, 6)) 
+
+
+
+
+rt_plot
+
+dispersion_plot <- freq_EE %>%
+  ggplot(aes(x = date, y = dispersion))+
+  geom_line()+
+        geom_vline(xintercept = as.numeric(as.Date("2021-01-04")), linetype="solid", color = "grey") +
+    geom_vline(xintercept = as.numeric(as.Date("2021-08-09")), linetype="solid", color = "grey") +
+    geom_vline(xintercept = as.numeric(as.Date("2022-01-04")), linetype="solid", color = "grey") +
+
+  theme_bw()+
+  ggtitle("Dispersion")+
+  ylab("Dispersion")+
+  theme(legend.position = c(.25, .75), legend.background = element_rect(fill="transparent"))+
+  labs(colour = "Past Days")+
+  xlab("Date") 
+
+dispersion_plot
+
+```
+
+Visualize OC Data
+```{r}
+#visualize data
+cases_plot <- weekly_input_data_oc %>%
+              filter(min_date >= "2020-08-02") %>%
+              ggplot(aes(x = min_date, y = total_cases)) +
+              geom_line() +
+              geom_point() +
+              theme_bw() +
+              ylab("Cases") +
+              xlab("Date") +
+  scale_x_date(date_labels = "%b %Y") +
+              ggtitle("Weekly Reported Cases (OC)")
+              
+tests_plot <- weekly_input_data_oc %>%
+              filter(min_date >= "2020-08-02") %>%
+              ggplot(aes(x = min_date, y = total_tests)) +
+              geom_line() +
+              geom_point() +
+              theme_bw() +
+              ylab("Tests") +
+              xlab("Date") +
+  scale_x_date(date_labels = "%b %Y") +
+              ggtitle("Weekly Administered Tests (OC)")
+
+oc_data_plot <- cases_plot + tests_plot
+```
+
+Combine into one big plot
+```{r}
+freq_ee_plot <- (cases_plot + tests_plot) /
+  (epiestim_weekly_plot_window4 + rt_pure_plot +rt_plot) / 
+  dispersion_plot
+
+freq_ee_plot
+```

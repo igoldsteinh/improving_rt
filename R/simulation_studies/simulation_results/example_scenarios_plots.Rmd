@@ -19,6 +19,7 @@ rstan_options(auto_write = TRUE)
 
 source(here::here("R", "rt_utility_functions2.R"))
 
+# color palette from https://www.datanovia.com/en/blog/ggplot-colors-best-tricks-you-will-love/
 cbPallette <- c("#999999", "#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2", "#D55E00", "#CC79A7")
 
 ```

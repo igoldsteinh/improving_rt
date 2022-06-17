@@ -1,7 +1,3 @@
-# This document has useful functions for calculating weights for use in 
-# models of RT estimation
-# It also has functions useful for graphing posterior estimates and 
-# posterior predictives from RT estimation models
 library(tidyverse)
 library(EpiEstim)
 library(tidybayes)
@@ -22,8 +18,10 @@ library(brms)
 
 
 # color blind friendly palette
+# color palette from https://www.datanovia.com/en/blog/ggplot-colors-best-tricks-you-will-love/
 cbPalette <- c("#999999", "#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2", "#D55E00", "#CC79A7")
-# Discretize Gamma Distributions ------------------------------------------
+
+# Discretize  Distributions ------------------------------------------
 # Epidemia style discretization of gamma
 epidemia_gamma <- function(y, alpha, beta) {
   pmf <- rep(0, y)
@@ -238,10 +236,7 @@ graph_rt_posterior <- function(true_data,
 }
 
 # Next graph posterior predictive intervals
-#true_data <- test_data_betabinom2
-#posterior = gamma_seed_fit_bb2
-#num_seed = 8
-#start_date = min(true_data$time)
+
 #First summarise incid posterior predictive
 summarise_incid_posterior <- function(true_data, 
                                       true_var,

@@ -1,0 +1,717 @@
+---
+title: "Fitting to all fifteen counties"
+author: "Isaac Goldstein"
+date: '2022-06-16'
+output: html_document
+---
+```{r}
+library(tidyverse)
+library(rstan)
+library(tidybayes)
+library(patchwork)
+library(EpiEstim)
+library(epidemia)
+library(rstanarm)
+library(lubridate)
+library(coda)
+options(mc.cores = parallel::detectCores())
+rstan_options(auto_write = TRUE)
+
+source(here::here("R", "rt_utility_functions2.R"))
+
+# color palette from https://www.datanovia.com/en/blog/ggplot-colors-best-tricks-you-will-love/
+cbPallette <- c("#999999", "#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2", "#D55E00", "#CC79A7")
+
+```
+
+
+# estimgamma fit to 15 CA counties from Aug 2020 to Jan 2021
+models fit in: R/realdata_analysis/realdata_analysis_scripts/template_cadata_estimgamma_sendergen.R
+
+results summarised in: R/realdata_analysis/realdata_analysis_scripts/county_summaries_estimgamma_sendergen.R
+```{r}
+ca_data <- read_csv(here::here("data", "covid19cases_test.csv"))
+
+cbPalette <- c("#999999", "#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2", "#D55E00", "#CC79A7")
+
+standiags <- read_csv(here::here("R", 
+                                 "realdata_analysis", 
+                                 "realdata_results", 
+                                 "estimgamma_results", 
+                                 "ca_county_standiags_sendergen.csv"))
+
+ca_rtposteriors <- read_rds(here::here("R", 
+                                 "realdata_analysis", 
+                                 "realdata_results", 
+                                 "estimgamma_results",
+                                 "ca_county_rtposteriors_sendergen.rds")) %>%
+                   bind_rows()
+
+ca_incidposteriors <- read_rds(here::here("R", 
+                                 "realdata_analysis", 
+                                 "realdata_results", 
+                                 "estimgamma_results",
+                                 "ca_county_incidposteriors_sendergen.rds")) %>%
+                      bind_rows()
+
+ca_county_caseposteriors <- read_rds(here::here("R", 
+                                 "realdata_analysis", 
+                                 "realdata_results", 
+                                 "estimgamma_results",
+                                 "ca_county_caseposteriors_sendergen.rds")) %>%
+                                bind_rows()
+
+# we'll make three plots one for each region and then include rt and case pp
+
+norcal <- c("Sacramento", "Alameda", "San Francisco", "Santa Clara", "Contra Costa")
+
+midcal <- c("Stanislaus", "Monterey", "Merced", "Fresno", "Tulare")
+  
+socal <- c("San Diego", "Orange", "Riverside", "Los Angeles", "San Bernardino")
+
+
+ca_rtposteriors$county <- factor(ca_rtposteriors$county,  levels = c(norcal, midcal, socal))
+
+ca_incidposteriors$county <- factor(ca_incidposteriors$county,  levels = c(norcal, midcal, socal))
+
+ca_county_caseposteriors$county <- factor(ca_county_caseposteriors$county,  levels = c(norcal, midcal, socal))
+
+allcounties_rtplot <- ca_rtposteriors %>%
+                ggplot(aes(x = min_date, y = rt_median,  ymin = rt_CI95l, ymax = rt_CI95u, fill = "95% Credible"))+
+    geom_ribbon(alpha = .4,  color = "steelblue4")+
+    geom_line()+
+    geom_hline(yintercept=1, linetype="dashed", color = "black") +
+    geom_vline(xintercept = as.numeric(as.Date("2021-01-04")), linetype="solid", color = "grey") +
+    geom_vline(xintercept = as.numeric(as.Date("2021-08-09")), linetype="solid", color = "grey") +
+    geom_vline(xintercept = as.numeric(as.Date("2022-01-04")), linetype="solid", color = "grey") +
+    theme_bw()+
+    ylab("Rt")+
+    xlab("")+
+    scale_linetype(name = NULL) +
+    scale_fill_brewer(name="CI", labels="95%", 
+                      guide = guide_legend(title.position = "top", direction = "horizontal"))+
+    theme(legend.position = c(0.93, 0.95), legend.background = element_rect(fill="transparent"))+
+    ggtitle("Rt-estim-gamma Rt (All Counties)") +
+    theme(text = element_text(size = 14),
+          panel.grid.major.x = element_blank(),
+          panel.grid.minor.x = element_blank()) +
+    scale_x_date(date_labels = "%b %Y") + 
+    scale_y_continuous(expand = c(0, 0), limits = c(0, 4)) +
+    facet_wrap(~county, nrow = 5, ncol = 3)
+
+allcounties_incidplot <- ca_incidposteriors %>%
+    filter(date >= 1) %>%
+    ggplot(aes(x = min_date, y = incid_median,  ymin = incid_CI95l, ymax = incid_CI95u, fill = "95% Credible"))+
+    geom_ribbon(alpha = .4,  color = "steelblue4")+
+    geom_line()+
+      geom_vline(xintercept = as.numeric(as.Date("2021-01-04")), linetype="solid", color = "grey") +
+    geom_vline(xintercept = as.numeric(as.Date("2021-08-09")), linetype="solid", color = "grey") +
+    geom_vline(xintercept = as.numeric(as.Date("2022-01-04")), linetype="solid", color = "grey") +
+    theme_bw()+
+    ylab("Incidence")+
+    xlab("")+
+    scale_linetype(name = NULL) +
+    scale_fill_brewer(name="CI", labels="95%", 
+                      guide = guide_legend(title.position = "top", direction = "horizontal"))+
+    theme(legend.position = "none", legend.background = element_rect(fill="transparent"))+
+    ggtitle("Rt-Estim-Gamma Incidence") +
+    theme(text = element_text(size = 14),
+          panel.grid.major.x = element_blank(),
+          panel.grid.minor.x = element_blank()) +
+    scale_x_date(date_labels = "%b %Y") +
+    facet_wrap(~county, nrow = 5, ncol = 3, scales = "free_y")
+
+allcounties_caseplot <- ca_county_caseposteriors %>%
+    ggplot(aes(x = min_date, y = case_median, ymin = case_CI95l, ymax = case_CI95u, fill = "95% Credible")) +
+    geom_ribbon(alpha = .4,  color = "steelblue4") +
+    geom_line() +
+     geom_vline(xintercept = as.numeric(as.Date("2021-01-04")), linetype="solid", color = "grey") +
+    geom_vline(xintercept = as.numeric(as.Date("2021-08-09")), linetype="solid", color = "grey") +
+    geom_vline(xintercept = as.numeric(as.Date("2022-01-04")), linetype="solid", color = "grey") +
+    theme_bw() +
+    ylab("Cases") +
+    xlab("Date") +
+    geom_point(aes(x = min_date, y = total_cases, lty = "Truth"), color = cbPalette[7], show.legend = FALSE, size = 0.75) +
+    ggtitle("Rt-estim-gamma Cases") +
+    theme(text = element_text(size = 14),
+          panel.grid.major.x = element_blank(),
+          panel.grid.minor.x = element_blank()) +
+    scale_x_date(date_labels = "%b %Y") +
+    xlab("") +
+    scale_fill_brewer(name="CI", labels="95%", 
+                      guide = guide_legend(title.position = "top", direction = "horizontal")) +
+    scale_linetype(name = NULL) +
+    theme(legend.position = "none", legend.background = element_rect(fill="transparent"))+
+    facet_wrap(~county, nrow = 5, ncol = 3, scales = "free_y")
+  
+allcounties_rtplot
+allcounties_incidplot
+allcounties_caseplot
+```
+
+# Appendix figure fitting epiestim to fifteen CA counties
+results generated in R/realdata_analysis/realdata_analysis_scripts/cadata_epiestim.R
+```{r}
+cadata_epiestim <- read_rds(here::here("R", 
+                                       "realdata_analysis", 
+                                       "realdata_results", 
+                                       "epiestim_results",  
+                                       "cadata_epiestim_res.rds"))
+
+ca_rtposteriors <- cadata_epiestim %>%
+                   bind_rows()
+
+# we'll make three plots one for each region and then include rt and case pp
+
+norcal <- c("Sacramento", "Alameda", "San Francisco", "Santa Clara", "Contra Costa")
+
+midcal <- c("Stanislaus", "Monterey", "Merced", "Fresno", "Tulare")
+  
+socal <- c("San Diego", "Orange", "Riverside", "Los Angeles", "San Bernardino")
+
+
+ca_rtposteriors$county <- factor(ca_rtposteriors$county,  levels = c(norcal, midcal, socal))
+
+epiestim_allcounties_rtplot <- ca_rtposteriors %>%
+                ggplot(aes(x = min_date, y = rt_median,  ymin = rt_CI95l, ymax = rt_CI95u, fill = "95% Credible"))+
+    geom_ribbon(alpha = .4,  color = "steelblue4")+
+    geom_line()+
+    geom_hline(yintercept=1, linetype="dashed", color = "black") +
+      geom_vline(xintercept = as.numeric(as.Date("2021-01-04")), linetype="solid", color = "grey") +
+    geom_vline(xintercept = as.numeric(as.Date("2021-08-09")), linetype="solid", color = "grey") +
+    geom_vline(xintercept = as.numeric(as.Date("2022-01-04")), linetype="solid", color = "grey") +
+    theme_bw()+
+    ylab("Rt")+
+    xlab("")+
+    scale_linetype(name = NULL) +
+    scale_fill_brewer(name="CI", labels="95%", 
+                      guide = guide_legend(title.position = "top", direction = "horizontal"))+
+    theme(legend.position = c(0.93, 0.95), legend.background = element_rect(fill="transparent"))+
+    ggtitle("EpiEstim Rt (All Counties)") +
+    theme(text = element_text(size = 14),
+          panel.grid.major.x = element_blank(),
+          panel.grid.minor.x = element_blank()) +
+    scale_x_date(date_labels = "%b %Y") + 
+    scale_y_continuous(expand = c(0, 0), limits = c(0, 5.5)) +
+    facet_wrap(~county, nrow = 5, ncol = 3) +
+    theme(strip.text.x = element_text(size = 12))
+
+epiestim_allcounties_rtplot
+```
+
+# Appendix figures, estimgamma Aug 2nd to Jan 9 results with gen time 5.5 compared to 9.7
+ferretti (short) gen time fit with:
+R/realdata_analysis/realdata_analysis_scripts/template_cadata_estimgamma_fergen.R
+summarised with:
+R/realdata_analysis/realdata_analysis_scripts/county_summaries_estimgamma_fergen.R
+
+```{r}
+# short first 
+ca_data <- read_csv("covid19cases_test.csv")
+
+# color palette from https://www.datanovia.com/en/blog/ggplot-colors-best-tricks-you-will-love/
+
+cbPalette <- c("#D55E00", "#56B4E9", "#CC79A7", "#E69F00",  "#009E73", "#F0E442", "#0072B2")
+
+standiags_short <- read_csv(here::here("R", 
+                                       "realdata_analysis", 
+                                       "realdata_results",
+                                       "estimgamma_results",
+                                       "ca_county_standiags_fergen.csv"))
+
+ca_rtposteriors_short <- read_rds(here::here("R", 
+                                             "realdata_analysis", 
+                                             "realdata_results", 
+                                             "estimgamma_results", 
+                                             "ca_county_rtposteriors_fergen.rds")) %>%
+                          bind_rows()
+
+ca_incidposteriors_short <- read_rds(here::here("R", 
+                                             "realdata_analysis", 
+                                             "realdata_results", 
+                                             "estimgamma_results", 
+                                             "ca_county_incidposteriors_fergen.rds")) %>%
+                      bind_rows()
+
+ca_county_caseposteriors_short <- read_rds(here::here("R", 
+                                             "realdata_analysis", 
+                                             "realdata_results", 
+                                             "estimgamma_results", 
+                                             "ca_county_caseposteriors_fergen.rds")) %>%
+                                bind_rows()
+
+# we'll make three plots one for each region and then include rt and case pp
+
+norcal <- c("Sacramento", "Alameda", "San Francisco", "Santa Clara", "Contra Costa")
+
+midcal <- c("Stanislaus", "Monterey", "Merced", "Fresno", "Tulare")
+  
+socal <- c("San Diego", "Orange", "Riverside", "Los Angeles", "San Bernardino")
+
+
+ca_rtposteriors_short$county <- factor(ca_rtposteriors_short$county,  levels = c(norcal, midcal, socal))
+
+
+ca_incidposteriors_short$county <- factor(ca_incidposteriors_short$county,  levels = c(norcal, midcal, socal))
+
+ca_county_caseposteriors_short$county <- factor(ca_county_caseposteriors_short$county,  levels = c(norcal, midcal, socal))
+
+# then long 
+
+standiags_long <- read_csv(here::here("R", 
+                                 "realdata_analysis", 
+                                 "realdata_results", 
+                                 "estimgamma_results", 
+                                 "ca_county_standiags_sendergen.csv"))
+
+ca_rtposteriors_long <- read_rds(here::here("R", 
+                                 "realdata_analysis", 
+                                 "realdata_results", 
+                                 "estimgamma_results", 
+                                 "ca_county_rtposteriors_sendergen.rds")) %>%
+                   bind_rows()
+
+ca_incidposteriors_long <- read_rds(here::here("R", 
+                                 "realdata_analysis", 
+                                 "realdata_results", 
+                                 "estimgamma_results", 
+                                 "ca_county_incidposteriors_sendergen.rds")) %>%
+                      bind_rows()
+
+ca_county_caseposteriors_long <- read_rds(here::here("R", 
+                                 "realdata_analysis", 
+                                 "realdata_results", 
+                                 "estimgamma_results", 
+                                 "ca_county_caseposteriors_sendergen.rds")) %>%
+                                bind_rows()
+
+# we'll make three plots one for each region and then include rt and case pp
+
+norcal <- c("Sacramento", "Alameda", "San Francisco", "Santa Clara", "Contra Costa")
+
+midcal <- c("Stanislaus", "Monterey", "Merced", "Fresno", "Tulare")
+  
+socal <- c("San Diego", "Orange", "Riverside", "Los Angeles", "San Bernardino")
+
+
+ca_rtposteriors_long$county <- factor(ca_rtposteriors_long$county,  levels = c(norcal, midcal, socal))
+
+ca_incidposteriors_long$county <- factor(ca_incidposteriors_long$county,  levels = c(norcal, midcal, socal))
+
+ca_county_caseposteriors_long$county <- factor(ca_county_caseposteriors_long$county,  levels = c(norcal, midcal, socal))
+
+
+# now combine
+
+ca_rtposteriors_long <- ca_rtposteriors_long %>%
+                        mutate(`Gen Time` = "Long")
+
+ca_rtposteriors_short <- ca_rtposteriors_short %>%
+                   mutate(`Gen Time` = "Short")
+
+ca_incidposteriors_long <- ca_incidposteriors_long %>%
+                           mutate(`Gen Time` = "Long")
+
+ca_incidposteriors_short <- ca_incidposteriors_short %>%
+                      mutate(`Gen Time` = "Short")
+
+ca_county_caseposteriors_long <- ca_county_caseposteriors_long %>%
+                           mutate(`Gen Time` = "Long")
+
+ca_county_caseposteriors_short <- ca_county_caseposteriors_short %>%
+                      mutate(`Gen Time` = "Short")
+
+ca_rtposteriors_combine <- rbind(ca_rtposteriors_long, ca_rtposteriors_short)
+
+ca_incidposteriors_combine <- rbind(ca_incidposteriors_long, ca_incidposteriors_short)
+
+ca_caseposteriors_combine <- rbind(ca_county_caseposteriors_long, ca_county_caseposteriors_short)
+                    
+# rt plot combined
+gentime_rtplot_combine <- ca_rtposteriors_combine%>%
+                ggplot(aes(x = min_date, y = rt_median,  ymin = rt_CI95l, ymax = rt_CI95u, fill = `Gen Time`))+
+    geom_ribbon(alpha = .5)+
+    geom_line(aes(linetype = `Gen Time`))+
+    geom_hline(yintercept=1, linetype="dashed", color = "black") +
+    geom_vline(xintercept = as.numeric(as.Date("2021-01-04")), linetype="solid", color = "grey") +
+    geom_vline(xintercept = as.numeric(as.Date("2021-08-09")), linetype="solid", color = "grey") +
+    geom_vline(xintercept = as.numeric(as.Date("2022-01-04")), linetype="solid", color = "grey") +
+    theme_bw()+
+    ylab("Rt")+
+    xlab("")+
+    scale_fill_brewer(name="CI", 
+                      guide = guide_legend(title.position = "top", direction = "horizontal"))+
+  scale_fill_manual(values = cbPalette) +
+    theme(legend.position = c(0.93, 0.94), legend.background = element_rect(fill="transparent"))+
+    ggtitle("Rt-estim-gamma Rt (Short vs. Long Gen Time)") +
+    theme(text = element_text(size = 14),
+          panel.grid.major.x = element_blank(),
+          panel.grid.minor.x = element_blank()) +
+    scale_x_date(date_labels = "%b %Y") + 
+    scale_y_continuous(expand = c(0, 0), limits = c(0, 4)) +
+    facet_wrap(~county, nrow = 5, ncol = 3)
+
+
+# incid plot combine
+gentime_incidplot_combine <- ca_incidposteriors_combine %>%
+    filter(date >= 1) %>%
+    ggplot(aes(x = min_date, y = incid_median,  ymin = incid_CI95l, ymax = incid_CI95u, fill = `Gen Time`))+
+    geom_ribbon(alpha = .4)+
+    geom_line(aes(linetype = `Gen Time`))+
+      geom_vline(xintercept = as.numeric(as.Date("2021-01-04")), linetype="solid", color = "grey") +
+    geom_vline(xintercept = as.numeric(as.Date("2021-08-09")), linetype="solid", color = "grey") +
+    geom_vline(xintercept = as.numeric(as.Date("2022-01-04")), linetype="solid", color = "grey") +
+    theme_bw()+
+    ylab("Incidence")+
+    xlab("")+
+    scale_fill_brewer(name="CI", labels="95%", 
+                      guide = guide_legend(title.position = "top", direction = "horizontal"))+
+    theme(legend.position = c(0.93, 0.94), legend.background = element_rect(fill="transparent"))+
+    scale_fill_manual(values = cbPalette) +
+    ggtitle("Rt-Estim-Gamma Incidence (Short vs. Long Gen Time)") +
+    theme(text = element_text(size = 14),
+          panel.grid.major.x = element_blank(),
+          panel.grid.minor.x = element_blank()) +
+    scale_x_date(date_labels = "%b %Y") +
+    facet_wrap(~county, nrow = 5, ncol = 3, scales = "free_y")
+
+
+# cases plot combined
+gentime_caseplot_combine <- ca_caseposteriors_combine %>%
+    ggplot(aes(x = min_date, y = case_median, ymin = case_CI95l, ymax = case_CI95u, fill = `Gen Time`)) +
+    geom_ribbon(alpha = .4) +
+    geom_line() +
+     geom_vline(xintercept = as.numeric(as.Date("2021-01-04")), linetype="solid", color = "grey") +
+    geom_vline(xintercept = as.numeric(as.Date("2021-08-09")), linetype="solid", color = "grey") +
+    geom_vline(xintercept = as.numeric(as.Date("2022-01-04")), linetype="solid", color = "grey") +
+    theme_bw() +
+    ylab("Cases") +
+    xlab("Date") +
+    geom_point(aes(x = min_date, y = total_cases, lty = "Truth"), color = cbPalette[6], show.legend = FALSE, size = 0.75) +
+    ggtitle("Rt-estim-gamma Cases (Short vs. Long Gen Time)") +
+    theme(text = element_text(size = 14),
+          panel.grid.major.x = element_blank(),
+          panel.grid.minor.x = element_blank()) +
+    scale_x_date(date_labels = "%b %Y") +
+    xlab("") +
+    scale_fill_brewer(name="PPI", labels="95%", 
+                      guide = guide_legend(title.position = "top", direction = "horizontal")) +
+      scale_fill_manual(values = cbPalette) +
+    scale_linetype(name = NULL) +
+    theme(legend.position = c(0.93, 0.94), legend.background = element_rect(fill="transparent"))+
+    facet_wrap(~county, nrow = 5, ncol = 3, scales = "free_y")
+  
+gentime_rtplot_combine
+gentime_incidplot_combine
+gentime_caseplot_combine
+```
+
+# Appendix figure with estimnormal estimates compared to estimgamma estimates
+ estimnormal models run in template_cadata_estimnormal.R
+results summarised in county_summaries_estimnormal.R
+
+
+estimgamma models run in template_cadata_estimgamma_shorttime.R
+summarised in county_summaries_estimgamma_shorttime_sendergen.R
+```{r}
+# estim normal estimates
+ca_data <- read_csv(here::here("data", "covid19cases_test.csv"))
+
+# color palette from https://www.datanovia.com/en/blog/ggplot-colors-best-tricks-you-will-love/
+cbPalette <- c("#D55E00", "#56B4E9", "#CC79A7", "#E69F00",  "#009E73", "#F0E442", "#0072B2")
+
+standiags_estimnormal <- read_csv(here::here("R", 
+                                             "realdata_analysis", 
+                                             "realdata_results", 
+                                             "estimnormal_results" 
+                                             "ca_county_standiags_estimnormal.csv"))
+
+ca_rtposteriors_estimnormal <- read_rds(here::here("R", 
+                                                   "realdata_analysis", 
+                                                   "realdata_results", 
+                                                   "estimnormal_results",
+                                                   "ca_county_rtposteriors_estimnormal.rds") %>%
+                   bind_rows()
+
+ca_incidposteriors_estimnormal <- read_rds("R", 
+                                           "realdatanalysis", 
+                                           "realdata_results",
+                                          "estimnormal_results",
+                                          "ca_county_incidposteriors_estimnormal.rds") %>%
+                      bind_rows()
+
+ca_county_caseposteriors_estimnormal <- read_rds("R", 
+                                                 "realdatanalysis", 
+                                                 "realdata_results", 
+                                                 "estimnormal_results",
+                                                 "ca_county_caseposteriors_estimnormal.rds") %>%
+                                bind_rows()
+
+# we'll make three plots one for each region and then include rt and case pp
+
+norcal <- c("Sacramento", "Alameda", "San Francisco", "Santa Clara", "Contra Costa")
+
+midcal <- c("Stanislaus", "Monterey", "Merced", "Fresno", "Tulare")
+  
+socal <- c("San Diego", "Orange", "Riverside", "Los Angeles", "San Bernardino")
+
+
+ca_rtposteriors_estimnormal$county <- factor(ca_rtposteriors_estimnormal$county,  levels = c(norcal, midcal, socal))
+
+ca_incidposteriors_estimnormal$county <- factor(ca_incidposteriors_estimnormal$county,  levels = c(norcal, midcal, socal))
+
+ca_county_caseposteriors_estimnormal$county <- factor(ca_county_caseposteriors_estimnormal$county,  levels = c(norcal, midcal, socal))
+
+# estim gamma estimates
+
+standiags_estimgamma_shorttime <- read_csv(here::here("R", 
+                                                      "realdata_analysis", 
+                                                      "realdata_results", 
+                                                      "estimgamma_results", 
+                                                      "ca_county_standiags_shorttime.csv"))
+
+ca_rtposteriors_shorttime <- read_rds(here::here("R",
+                                                 "realdata_analysis",
+                                                 "realdata_results",
+                                                 "estimgamma_results", 
+                                                 "ca_county_rtposteriors_shorttime.rds")) %>%
+                   bind_rows()
+
+ca_incidposteriors_shorttime <- read_rds(here::here("R",
+                                                    "realdata_analysis",
+                                                    "realdata_results",
+                                                    "estimgamma_results", 
+                                                    "ca_county_incidposteriors_shorttime.rds") %>%
+                      bind_rows()
+
+ca_county_caseposteriors_shorttime <- read_rds(here::here("R",
+                                                          "realdata_analysis",
+                                                          "realdata_results",
+                                                          "estimgamma_results",
+                                                          "ca_county_caseposteriors_shorttime.rds") %>%
+                                      bind_rows()
+
+# we'll make three plots one for each region and then include rt and case pp
+
+norcal <- c("Sacramento", "Alameda", "San Francisco", "Santa Clara", "Contra Costa")
+
+midcal <- c("Stanislaus", "Monterey", "Merced", "Fresno", "Tulare")
+  
+socal <- c("San Diego", "Orange", "Riverside", "Los Angeles", "San Bernardino")
+
+
+ca_rtposteriors_shorttime$county <- factor(ca_rtposteriors_shorttime$county,  levels = c(norcal, midcal, socal))
+
+ca_incidposteriors_shorttime$county <- factor(ca_incidposteriors_shorttime$county,  levels = c(norcal, midcal, socal))
+
+ca_county_caseposteriors_shorttime$county <- factor(ca_county_caseposteriors_shorttime$county,  levels = c(norcal, midcal, socal))
+
+
+# now combine
+
+ca_rtposteriors_shorttime <- ca_rtposteriors_shorttime %>%
+                        mutate(Model = "estim-gamma") %>%
+                        filter(min_date <= "2021-10-31") %>%
+                        dplyr::select(rt_median, rt_CI95l, rt_CI95u, min_date, county, Model)
+
+ca_rtposteriors_estimnormal <- ca_rtposteriors_estimnormal %>%
+                   ungroup() %>%
+                   filter(min_date <= "2021-10-31") %>%
+                   mutate(Model = "estim-normal") %>%
+                   rename("rt_median" = "value",
+                          "rt_CI95l" =".lower",
+                          "rt_CI95u" = ".upper")%>%
+                        dplyr::select(rt_median, rt_CI95l, rt_CI95u, min_date, county, Model)
+
+ca_incidposteriors_shorttime <- ca_incidposteriors_shorttime %>%
+                           mutate(Model = "estim-gamma")%>%
+                   filter(min_date <= "2021-10-31") %>%
+                        dplyr::select(incid_median, incid_CI95l, incid_CI95u, min_date, county, Model)
+
+ca_incidposteriors_estimnormal <- ca_incidposteriors_estimnormal %>%
+                    ungroup() %>%
+                     filter(min_date <= "2021-10-31") %>%
+                   mutate(Model = "estim-normal") %>%
+                   rename("incid_median" = "value",
+                          "incid_CI95l" =".lower",
+                          "incid_CI95u" = ".upper")%>%
+                        dplyr::select(incid_median, incid_CI95l, incid_CI95u, min_date, county, Model)
+
+
+ca_county_caseposteriors_shorttime <- ca_county_caseposteriors_shorttime %>%
+                           mutate(Model = "estim-gamma")%>%
+                   filter(min_date <= "2021-10-31") %>%
+                        dplyr::select(case_median, case_CI95l, case_CI95u, min_date, total_cases, county, Model)
+
+ca_county_caseposteriors_estimnormal <- ca_county_caseposteriors_estimnormal %>%
+                   ungroup() %>%
+                     filter(min_date <= "2021-10-31") %>%
+                   mutate(Model = "estim-normal") %>%
+                   rename("case_median" = "value",
+                          "case_CI95l" =".lower",
+                          "case_CI95u" = ".upper")%>%
+                        dplyr::select(case_median, case_CI95l, case_CI95u, min_date, total_cases, county, Model)
+
+
+ca_rtposteriors_combine <- rbind(ca_rtposteriors_shorttime,
+                                 ca_rtposteriors_estimnormal)
+
+ca_incidposteriors_combine <- rbind(ca_incidposteriors_shorttime,
+                                    ca_incidposteriors_estimnormal)
+
+ca_caseposteriors_combine <- rbind(ca_county_caseposteriors_shorttime,
+                                   ca_county_caseposteriors_estimnormal)
+                    
+# rt plot combined
+diffmodel_rtplot_combine <- ca_rtposteriors_combine%>%
+                ggplot(aes(x = min_date, y = rt_median,  ymin = rt_CI95l, ymax = rt_CI95u, fill = Model))+
+    geom_ribbon(alpha = .5)+
+    geom_line(aes(linetype = Model))+
+    geom_hline(yintercept=1, linetype="dashed", color = "black") +
+    geom_vline(xintercept = as.numeric(as.Date("2021-01-04")), linetype="solid", color = "grey") +
+    geom_vline(xintercept = as.numeric(as.Date("2021-08-09")), linetype="solid", color = "grey") +
+    geom_vline(xintercept = as.numeric(as.Date("2022-01-04")), linetype="solid", color = "grey") +
+    theme_bw()+
+    ylab("Rt")+
+    xlab("")+
+    scale_fill_brewer(name="CI", 
+                      guide = guide_legend(title.position = "top", direction = "horizontal"))+
+  scale_fill_manual(values = cbPalette) +
+    theme(legend.position = c(0.83, 0.55), legend.background = element_rect(fill="transparent"))+
+    ggtitle("Rt (estim-normal vs estim-gamma)") +
+    theme(text = element_text(size = 14),
+          axis.text.x = element_text(angle = 10),
+          panel.grid.major.x = element_blank(),
+          panel.grid.minor.x = element_blank()) +
+    scale_x_date(date_labels = "%b %Y", 
+                 date_breaks = "5 months") + 
+    scale_y_continuous(expand = c(0, 0), limits = c(0, 4)) +
+    facet_wrap(~county, nrow = 5, ncol = 3)
+
+# incid plot combine
+diffmodel_incidplot_combine <- ca_incidposteriors_combine %>%
+    ggplot(aes(x = min_date, y = incid_median,  ymin = incid_CI95l, ymax = incid_CI95u, fill = Model))+
+    geom_ribbon(alpha = .4)+
+    geom_line(aes(linetype = Model))+
+      geom_vline(xintercept = as.numeric(as.Date("2021-01-04")), linetype="solid", color = "grey") +
+    geom_vline(xintercept = as.numeric(as.Date("2021-08-09")), linetype="solid", color = "grey") +
+    geom_vline(xintercept = as.numeric(as.Date("2022-01-04")), linetype="solid", color = "grey") +
+    theme_bw()+
+    ylab("Incidence (estim-normal vs estim-gamma)")+
+    xlab("")+
+    scale_fill_brewer(name="CI", labels="95%", 
+                      guide = guide_legend(title.position = "top", direction = "horizontal")) +
+    theme(legend.position = c(0.91, 0.53), legend.background = element_rect(fill="transparent")) +    scale_fill_manual(values = cbPalette) +
+    ggtitle("Incidence (estim-normal vs. estim-gamma)") +
+    theme(text = element_text(size = 14),
+          axis.text.x = element_text(angle = 10),
+          panel.grid.major.x = element_blank(),
+          panel.grid.minor.x = element_blank()) +
+    scale_x_date(date_labels = "%b %Y",
+                 date_breaks = "5 months") +
+    facet_wrap(~county, nrow = 5, ncol = 3, scales = "free_y")
+
+
+# cases plot combined
+diffmodel_caseplot_combine <- ca_caseposteriors_combine %>%
+    ggplot(aes(x = min_date, y = case_median, ymin = case_CI95l, ymax = case_CI95u, fill = Model)) +
+    geom_ribbon(alpha = .4) +
+    geom_line() +
+     geom_vline(xintercept = as.numeric(as.Date("2021-01-04")), linetype="solid", color = "grey") +
+    geom_vline(xintercept = as.numeric(as.Date("2021-08-09")), linetype="solid", color = "grey") +
+    geom_vline(xintercept = as.numeric(as.Date("2022-01-04")), linetype="solid", color = "grey") +
+    theme_bw() +
+    ylab("Cases") +
+    xlab("Date") +
+    geom_point(aes(x = min_date, y = total_cases, lty = "Truth"), color = cbPalette[6], show.legend = FALSE, size = 0.75) +
+    ggtitle("Cases (estim-normal vs estim-gamma)") +
+    theme(text = element_text(size = 14),
+          axis.text.x = element_text(angle = 10),
+          panel.grid.major.x = element_blank(),
+          panel.grid.minor.x = element_blank()) +
+    scale_x_date(date_labels = "%b %Y",
+                 date_breaks = "5 months") +
+    xlab("") +
+    scale_fill_brewer(name="PPI", labels="95%", 
+                      guide = guide_legend(title.position = "top", direction = "horizontal")) +
+      scale_fill_manual(values = cbPalette) +
+    scale_linetype(name = NULL) +
+    theme(legend.position = c(0.93, 0.53), legend.background = element_rect(fill="transparent")) +     facet_wrap(~county, nrow = 5, ncol = 3, scales = "free_y")
+
+
+diffmodel_rtplot_combine
+diffmodel_incidplot_combine
+diffmodel_caseplot_combine
+```
+
+# Appendix figure showing spline and model fit side by side
+models fit in: R/realdata_analysis/realdata_analysis_scripts/template_cadata_estimgamma_sendergen.R
+
+results summarised in: R/realdata_analysis/realdata_analysis_scripts/county_summaries_estimgamma_sendergen.R
+
+spline data generated in R/realdata_analysis/realdata_analysis_scripts/alameda_estimgamma.R
+```{r}
+
+alameda_caseposteriors <- read_rds(here::here("R", 
+                                 "realdata_analysis", 
+                                 "realdata_results", 
+                                 "estimgamma_results",
+                                 "ca_county_caseposteriors_sendergen.rds")) %>%
+                                bind_rows() %>%
+                                filter(county == "Alameda")
+
+alameda_spline_posterior <- read_csv(here::here("R", 
+                                 "realdata_analysis", 
+                                 "realdata_results", 
+                                 "estimgamma_results",
+                                 "alameda_spline_data.csv"))
+
+estimgamma_case_plot <- alameda_caseposteriors %>%
+                     ggplot(aes(x = min_date, y = case_median, ymin = case_CI95l, ymax = case_CI95u, fill = "95% Credible")) +
+    geom_ribbon(alpha = .4,  color = "steelblue4") +
+    geom_line() +
+    theme_bw() +
+    ylab("Cases") +
+    xlab("Date") +
+    geom_point(aes(x = min_date, y = total_cases, lty = "Truth"), color = cbPalette[7], size = 0.33, show.legend = FALSE) +
+    ggtitle("Spline Case PP ") +
+    theme(text = element_text(size = 14),
+          panel.grid.major.x = element_blank(),
+          panel.grid.minor.x = element_blank()) +
+    scale_x_date(date_labels = "%b %Y") +
+    xlab("") +
+    scale_fill_brewer(name="CI", labels="95%", 
+                      guide = guide_legend(title.position = "top", direction = "horizontal")) +
+    scale_linetype(name = NULL)+
+    scale_y_continuous(expand = c(0, 0), limits = c(0, 60000), breaks = c(20000, 40000, 60000)) +
+  ggtitle("Rt-estim-gamma Case PP") +
+  ylab("") +
+  xlab("Date") +
+  theme(legend.position = c(0.6, 0.65), legend.background = element_rect(fill="transparent"))
+
+spline_case_plot <- alameda_spline_posterior %>%
+                     ggplot(aes(x = min_date, y = .prediction, ymin = .lower, ymax = .upper, fill = "95% Credible")) +
+    geom_ribbon(alpha = .4,  color = "steelblue4") +
+    geom_line() +
+    theme_bw() +
+    ylab("Cases") +
+    xlab("Date") +
+    geom_point(aes(x = min_date, y = total_cases, lty = "Truth"), color = cbPalette[7], size = 0.33, show.legend = FALSE) +
+    ggtitle("Spline Case PP ") +
+    theme(text = element_text(size = 14),
+          panel.grid.major.x = element_blank(),
+          panel.grid.minor.x = element_blank()) +
+    scale_x_date(date_labels = "%b %Y") +
+    xlab("") +
+    scale_fill_brewer(name="CI", labels="95%", 
+                      guide = guide_legend(title.position = "top", direction = "horizontal")) +
+    scale_linetype(name = NULL) +
+    theme(legend.position = "none", legend.background = element_rect(fill="transparent")) +
+    scale_y_continuous(expand = c(0, 0), limits = c(0, 60000), breaks = c(20000, 40000, 60000)) +
+  xlab("Date")
+
+
+case_pp_combined <- spline_case_plot + estimgamma_case_plot 
+
+case_pp_combined
+```
