@@ -1403,44 +1403,28 @@ EE_post_pred <- function(ee_outs,
 
 # adding in our epiestim frequentist functions ----------------------------
 
-# Function for creating columns of n day lags 
-# Copyright 2018 by Romain Francois
-# Used under:  Attribution-NonCommercial-ShareAlike 4.0 International (CC BY-NC-SA 4.0) 
-# Original Blog Post: https://purrple.cat/blog/2018/03/02/multiple-lags-with-tidy-evaluation/
-# No changes were made
-
-jet_lag <- function(data, variable, n=10){
-  variable <- enquo(variable)
-  
-  indices <- seq_len(n)
-  quosures <- map( indices, ~quo(lag(!!variable, !!.x)) ) %>% 
-    set_names(sprintf("lag_%02d", indices))
-  
-  mutate( data, !!!quosures )
-  
-}
-
 
 # function for creating poisson and normal regression approximations
-# of epi-estim
-# data =freq_data
-# numdays = 4
-# weights = epidemia_weights
-# date_choice = "end"
-# window_size = 4
-# i <- 1
 poisson_r_estimation <- function(data, numdays, weights,
                                  date_choice = "middle", window_size = 14) {
   
   
   
 
-  lags <- jet_lag(data, I, n=numdays)%>%
-    drop_na()%>%
+  
+  for (i in 1:numdays){
+    varname <- str_c("I", "_", i)
+    data <- data %>% 
+      mutate(!!varname := lag(I, i))
+    
+  }
+  
+  final_data <- data %>% drop_na()
+  
+  lags <- final_data %>%
     dplyr::select(-I, -dates)
   
-  data_n <- jet_lag(data, I, n=numdays)%>%
-    drop_na()%>%
+  data_n <- final_data %>%
     dplyr::select(dates, I)
   
   # data set creation
