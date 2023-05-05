@@ -3,12 +3,12 @@
 library(tidyverse)
 library(tidybayes)
 library(stringr)
-source("rt_utility_functions2.R")
+source(here::here("R", "rt_utility_functions2.R"))
 
 
 # read in data and results ---------------------------------------------------------
 
-ca_data <- read_csv("covid19cases_test.csv")
+ca_data <- read_csv(here::here("data", "covid19cases_test.csv"))
 # county_names <- c("San Diego",
 #                   "Stanislaus")
 # file_names <- c("San Diego_estimgamma.rds",
@@ -93,10 +93,11 @@ file_names_casesposterior <- c("San Diego_estimnormal_cases.rds",
                                "Tulare_estimnormal_cases.rds",
                                "Los Angeles_estimnormal_cases.rds")
 
-county_posteriors <- map(file_names, ~read_rds(here::here("ca_estimnormal_res",.x)))
-county_rt_posteriors <- map(file_names_rtposterior,  ~read_rds(here::here("ca_estimnormal_res",.x)))
-county_incid_posteriors <- map(file_names_incidposterior,  ~read_rds(here::here("ca_estimnormal_res",.x)))
-county_cases_posteriors <- map(file_names_casesposterior,  ~read_rds(here::here("ca_estimnormal_res",.x)))
+results_address = "R/realdata_analysis/realdata_results/estimnormal_results/"
+county_posteriors <- map(file_names, ~read_rds(paste0(results_address, .x)))
+county_rt_posteriors <- map(file_names_rtposterior,  ~read_rds(paste0(results_address, .x)))
+county_incid_posteriors <- map(file_names_incidposterior,  ~read_rds(paste0(results_address, .x)))
+county_cases_posteriors <- map(file_names_casesposterior,  ~read_rds(paste0(results_address, .x)))
 
 county_stan <- map(county_posteriors, pluck, "stanfit")
 # first task just look at the traces --------------------------------------
@@ -192,7 +193,7 @@ case_posteriors <- map2(county_cases_posteriors,
                                                              weekly_data = .y)) %>%
                    map2(county_names, ~.x %>% mutate(county = .y))
 
-write_csv(standiag_frame, "ca_county_standiags_estimnormal.csv")
-write_rds(rt_posteriors, "ca_county_rtposteriors_estimnormal.rds")
-write_rds(incid_posteriors, "ca_county_incidposteriors_estimnormal.rds")
-write_rds(case_posteriors, "ca_county_caseposteriors_estimnormal.rds")
+write_csv(standiag_frame, paste0(results_address, "ca_county_standiags_estimnormal.csv"))
+write_rds(rt_posteriors, paste0(results_address, "ca_county_rtposteriors_estimnormal.rds"))
+write_rds(incid_posteriors, paste0(results_address, "ca_county_incidposteriors_estimnormal.rds"))
+write_rds(case_posteriors, paste0(results_address, "ca_county_caseposteriors_estimnormal.rds"))

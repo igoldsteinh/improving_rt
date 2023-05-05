@@ -423,28 +423,28 @@ cbPalette <- c("#D55E00", "#56B4E9", "#CC79A7", "#E69F00",  "#009E73", "#F0E442"
 standiags_estimnormal <- read_csv(here::here("R", 
                                              "realdata_analysis", 
                                              "realdata_results", 
-                                             "estimnormal_results" 
+                                             "estimnormal_results", 
                                              "ca_county_standiags_estimnormal.csv"))
 
 ca_rtposteriors_estimnormal <- read_rds(here::here("R", 
                                                    "realdata_analysis", 
                                                    "realdata_results", 
                                                    "estimnormal_results",
-                                                   "ca_county_rtposteriors_estimnormal.rds") %>%
+                                                   "ca_county_rtposteriors_estimnormal.rds")) %>%
                    bind_rows()
 
-ca_incidposteriors_estimnormal <- read_rds("R", 
-                                           "realdatanalysis", 
+ca_incidposteriors_estimnormal <- read_rds(here::here("R", 
+                                           "realdata_analysis", 
                                            "realdata_results",
                                           "estimnormal_results",
-                                          "ca_county_incidposteriors_estimnormal.rds") %>%
+                                          "ca_county_incidposteriors_estimnormal.rds")) %>%
                       bind_rows()
 
-ca_county_caseposteriors_estimnormal <- read_rds("R", 
-                                                 "realdatanalysis", 
+ca_county_caseposteriors_estimnormal <- read_rds(here::here("R", 
+                                                 "realdata_analysis", 
                                                  "realdata_results", 
                                                  "estimnormal_results",
-                                                 "ca_county_caseposteriors_estimnormal.rds") %>%
+                                                 "ca_county_caseposteriors_estimnormal.rds")) %>%
                                 bind_rows()
 
 # we'll make three plots one for each region and then include rt and case pp
@@ -481,14 +481,14 @@ ca_incidposteriors_shorttime <- read_rds(here::here("R",
                                                     "realdata_analysis",
                                                     "realdata_results",
                                                     "estimgamma_results", 
-                                                    "ca_county_incidposteriors_shorttime.rds") %>%
+                                                    "ca_county_incidposteriors_shorttime.rds")) %>%
                       bind_rows()
 
 ca_county_caseposteriors_shorttime <- read_rds(here::here("R",
                                                           "realdata_analysis",
                                                           "realdata_results",
                                                           "estimgamma_results",
-                                                          "ca_county_caseposteriors_shorttime.rds") %>%
+                                                          "ca_county_caseposteriors_shorttime.rds")) %>%
                                       bind_rows()
 
 # we'll make three plots one for each region and then include rt and case pp
@@ -639,9 +639,11 @@ diffmodel_caseplot_combine <- ca_caseposteriors_combine %>%
     theme(legend.position = c(0.93, 0.53), legend.background = element_rect(fill="transparent")) +     facet_wrap(~county, nrow = 5, ncol = 3, scales = "free_y")
 
 
-diffmodel_rtplot_combine
-diffmodel_incidplot_combine
-diffmodel_caseplot_combine
+
+ggsave(here::here("R", "realdata_analysis","rt_posterior_estimnormal_vs_estimgamma.pdf"), diffmodel_rtplot_combine, height = 12, width = 12)
+ggsave(here::here("R", "realdata_analysis","incid_posterior_estimnormal_vs_estimgamma.pdf"), diffmodel_incidplot_combine, height = 12, width = 12)
+ggsave(here::here("R", "realdata_analysis","case_posterior_estimnormal_vs_estimgamma.pdf"), diffmodel_caseplot_combine, height = 12, width = 12)
+
 ```
 
 # Appendix figure showing spline and model fit side by side

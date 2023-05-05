@@ -68,6 +68,20 @@ final_list <- c(metric_list, list(ET_EE), list(LT_EE), list(DT_EE))
 
 test_posterior <- rt_posteriors_gamma[[1]]
 
+
+# gather all the stan diagnostics -----------------------------------------
+
+standiags_gamma <- map(res_list_gamma, ~map(.x, pluck, "stan_summary") %>%
+                             map(~.x %>% filter(date > 0) )) 
+
+standiags_epidemia <- map(res_list_epidemia,  ~map(.x, pluck, "stan_summary") %>%
+                                map(~.x %>% filter(time > 2))) 
+
+
+# write files -------------------------------------------------------------
+
+write_rds(standiags_gamma, "standiags_gamma.rds")
+write_rds(standiags_epidemia, "standiags_epidemia.rds")
 write_rds(test_posterior, "test_posterior.rds")
 write_rds(final_list, "final_list.rds")
 write_rds(S1_EE, "S1_EE.rds")

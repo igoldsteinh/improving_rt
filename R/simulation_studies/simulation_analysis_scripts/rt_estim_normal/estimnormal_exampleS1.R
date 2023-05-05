@@ -81,5 +81,3 @@ posteriors <- as.data.frame(fm2)
 write_rds(fm2, "estimnormal_exampleS1_fit.rds")
 
 
-# warnings were hit max tree depth on all samples
-# bulk ess and tail ess were too low

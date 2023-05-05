@@ -16,6 +16,7 @@ print(args)
 seed <- as.integer(args[1])
 print(seed)
 
+# for seed 19 we used 226
 set.seed(225)
 options(mc.cores = parallel::detectCores())
 rstan_options(auto_write = TRUE)
@@ -163,7 +164,7 @@ control_list <- list(adapt_delta = 0.999,
 
 posterior <- stan(file ="R/rt_estim_gamma.stan",
                            data = model_objects_gamma_seed_bb6,
-                           seed = 45,
+                           seed = 45, # for seed 19 we used 46
                            iter = 2000,
                            chain = 4,
                            init = init_func,

@@ -9,7 +9,7 @@ library(epidemia)
 #library(rstanarm)
 library(lubridate)
 #library(coda)
-source("rt_utility_functions2.R")
+source(here::here("R", "rt_utility_functions2.R"))
 
 
 
@@ -25,7 +25,7 @@ options(mc.cores = parallel::detectCores())
 rstan_options(auto_write = TRUE)
 
 
-ca_data <- read_csv("covid19cases_test.csv")
+ca_data <- read_csv(here::here("data", "covid19cases_test.csv"))
 
 
 county_list <- c("Alameda", "Los Angeles", "Orange", "San Diego", "San Francisco",
@@ -33,9 +33,9 @@ county_list <- c("Alameda", "Los Angeles", "Orange", "San Diego", "San Francisco
                  "Sacramento", "Fresno", "Merced", "Monterey", "Stanislaus",
                  "Tulare")
 
-indic <- 1
+indic <- 2
 
-for (indic in 1:length(county_list)) {
+for (indic in 2:length(county_list)) {
   
 
 county_name <- county_list[indic]
@@ -60,7 +60,7 @@ county_posterior <- fit_estimnormal_model(county_data,
                                           gen_params = c(log(7.872346) + log(1/7), 
                                                          0.642713),
                                           delay_params = c(4.05, 7*0.74),
-                                          iterations = 6000,
+                                          iterations = 8000,
                                           seed = 12345,
                                           init = FALSE,
                                           #init_func = init_func,
@@ -71,8 +71,10 @@ rt_posterior <- data.frame(posterior_rt(county_posterior)[["draws"]], seed = 123
 incid_posterior<- data.frame(posterior_infections(county_posterior)[["draws"]], seed = 12345)
 cases_posterior<- data.frame(epidemia::posterior_predict(county_posterior)[["draws"]], seed = 12345)
 
-write_rds(county_posterior, str_c(county_name, "_estimnormal", ".rds", ""))
-write_rds(rt_posterior, str_c(county_name, "_estimnormal_rt", ".rds", ""))
-write_rds(incid_posterior, str_c(county_name, "_estimnormal_incid", ".rds", ""))
-write_rds(cases_posterior, str_c(county_name, "_estimnormal_cases", ".rds", ""))
+results_address <- "R/realdata_analysis/realdata_results/estimnormal_results/"
+
+write_rds(county_posterior, paste0(results_address, str_c(county_name, "_estimnormal", ".rds", "")))
+write_rds(rt_posterior, paste0(results_address, str_c(county_name, "_estimnormal_rt", ".rds", "")))
+write_rds(incid_posterior, paste0(results_address, str_c(county_name, "_estimnormal_incid", ".rds", "")))
+write_rds(cases_posterior, paste0(results_address, str_c(county_name, "_estimnormal_cases", ".rds", "")))
 }
